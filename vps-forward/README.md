@@ -2,139 +2,52 @@
 
 [English](README_EN.md) · nftables IPv4 四层端口转发管理器
 
-`vps-forward` 是面向新装 VPS 的 Bash 工具，用独立 nftables 表管理“线路 VPS → 落地 VPS”的 TCP、UDP 或 TCP+UDP 单端口转发。它以本地配置为唯一数据源，每次通过原子 nftables 事务重建自己的规则，不清空 ruleset，也不修改 Docker、UFW、firewalld、Fail2ban 或用户的表。
+![CI](https://github.com/u1ra/script/actions/workflows/shellcheck.yml/badge.svg)
+![License](https://img.shields.io/badge/license-MIT-blue)
+
+`vps-forward` 是面向新装 VPS 的 Bash 工具，用独立 nftables 表管理"线路 VPS → 落地 VPS"的 TCP、UDP 或 TCP+UDP 单端口转发。它以本地配置为唯一数据源，每次通过原子 nftables 事务重建自己的规则，不清空 ruleset，也不修改 Docker、UFW、firewalld、Fail2ban 或用户的表。
 
 > [!CAUTION]
 > 修改防火墙可能让 VPS 断连。操作前请保留当前 SSH 会话，并确认 VPS 控制台或其他应急登录方式可用。本项目按现状提供；作者不对错误配置导致的断连、数据损失或服务中断负责。
 
 ## 功能
 
-- Ubuntu、Debian（`apt-get`）和 Alpine（`apk`）安装检测
-- systemd 与 OpenRC 独立持久化服务，不依赖 `/etc/nftables.conf`
-- IPv4 DNAT、对应 FORWARD 放行及可选 Masquerade
 - TCP、UDP、BOTH；监听全部地址或指定本机 IPv4
-- 精确、目标 IP、关闭三种 Masquerade 模式
-- 交互菜单与适合自动化的 CLI
-- CRUD、启用/禁用、dry-run、JSON 列表/状态、doctor
-- 版本化 TSV 配置、锁、原子写入、自动备份、验证和失败回滚
+- 精确（默认）、目标 IP、关闭三种 Masquerade 模式
+- 交互菜单（`vpf`）与适合自动化的 CLI，支持 JSON 输出
+- 原子应用：`flock` 锁、候选文件、`nft --check`、自动备份、失败回滚
+- 独立 systemd / OpenRC 持久化服务，不依赖 `/etc/nftables.conf`
+- doctor 只读诊断 UFW、firewalld、Docker、Fail2ban、iptables-nft 冲突
 - 备份、恢复、导入、导出及保守卸载
-- 只管理 `vps_forward_nat` 和 `vps_forward_filter` 两个带所有权标记的表
+
+支持系统：Ubuntu、Debian（`apt` + systemd）、Alpine Linux（`apk` + OpenRC）。主程序要求 Bash；Alpine 没有 Bash 时可用 POSIX `sh` 运行 `install.sh` 引导安装。
 
 当前版本只支持 IPv4 单端口。域名、IPv6、端口范围、负载均衡、透明代理、PROXY Protocol 和一对多转发不在 v0.1 范围内。
 
-## 支持系统
-
-| 系统 | 包管理器 | 服务管理 |
-|---|---|---|
-| Ubuntu | apt | systemd |
-| Debian | apt | systemd |
-| Alpine Linux | apk | OpenRC |
-
-主程序要求 Bash。Alpine 没有 Bash 时，可先用 POSIX `sh` 运行 `install.sh`，引导器会安装 Bash。遇到其他系统或没有受支持服务管理器时，安装会明确停止。
-
 ## 安装
 
-### 推荐：克隆、检查、再执行
+推荐克隆、审查、再执行：
 
 ```bash
 git clone https://github.com/u1ra/script.git
 cd script/vps-forward
-git log --oneline --show-signature -1
 less install.sh vps-forward.sh lib/vps-forward-core.sh
-sudo ./install.sh
+sudo ./install.sh && sudo vpf
 ```
 
-安装器会安装 nftables、iproute2 和 util-linux，将程序装到 `/usr/local`，写入项目 sysctl 文件，创建独立 systemd/OpenRC 服务，并应用空的项目 ruleset。重复安装会保留配置。
-
-### 使用 Bash 一键安装并启动
-
-在 `script/vps-forward` 源码目录中执行：
-
-```bash
-sudo bash install.sh && sudo vpf
-```
-
-第一条命令安装环境和持久化服务，并创建两个管理命令：
-
-- `vpf`：快捷命令，直接打开管理菜单；
-- `vps-forward`：完整命令，同样可打开菜单，也可使用 CLI 子命令。
-
-安装成功后，第二条命令立即打开交互菜单。也可以不安装直接运行源码菜单：
-
-```bash
-sudo bash vps-forward.sh
-```
-
-但直接运行主程序时，仍需先在菜单中选择“初始化环境”，否则系统可能尚未安装 nftables 或启用 IPv4 转发。Alpine 尚未安装 Bash 时，请先运行 `sudo sh install.sh`。
-
-### 固定版本与 SHA256
-
-发布 Release 后，下载固定标签而不是 `main`，并使用该 Release 附带的校验文件：
-
-```bash
-VERSION=v0.1.3
-curl -fLO "https://github.com/u1ra/script/releases/download/${VERSION}/vps-forward-${VERSION}.tar.gz"
-curl -fLO "https://github.com/u1ra/script/releases/download/${VERSION}/vps-forward-${VERSION}.tar.gz.sha256"
-sha256sum -c "vps-forward-${VERSION}.tar.gz.sha256"
-tar -xzf "vps-forward-${VERSION}.tar.gz"
-cd "vps-forward-${VERSION#v}"
-less install.sh vps-forward.sh
-sudo ./install.sh
-```
-
-可给远程引导器指定版本和期望散列：
-
-```bash
-sudo env VPF_INSTALL_VERSION=v0.1.3 VPF_SHA256='<release-sha256>' ./install.sh
-```
-
-### 使用 curl 一键安装并启动
-
-GitHub 仓库公开后执行：
+一键安装（仓库公开后可用，会直接执行网络内容，只适合了解风险的临时环境）：
 
 ```bash
 bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/u1ra/script/main/vps-forward/install.sh | sudo bash' && sudo vpf
 ```
 
-`bash -o pipefail` 可确保下载失败时整条安装流水线返回失败；安装成功后才会启动 `vps-forward` 菜单。不过，`curl | bash` 仍会直接执行网络内容，无法让你先审计，且默认分支内容可变化。它只适合了解风险的临时环境；生产环境应使用上面的固定版本、审查和 SHA256 流程。
+安装器会安装 nftables、iproute2 和 util-linux，将程序装到 `/usr/local`，写入项目 sysctl 文件，创建独立持久化服务，并提供两个命令：`vpf`（打开管理菜单）和 `vps-forward`（菜单 + CLI 子命令）。重复安装会保留配置；版本不一致时可选择升级、重装、卸载或取消，自动化环境可用 `--upgrade` / `--reinstall` / `--uninstall-existing` / `--yes`。
 
-全新 Alpine 尚未安装 Bash 时，可让 POSIX `sh` 运行引导器：
-
-```sh
-tmp_file="$(mktemp)" && curl -fsSL https://raw.githubusercontent.com/u1ra/script/main/vps-forward/install.sh -o "$tmp_file" && sudo sh "$tmp_file" && rm -f "$tmp_file" && sudo vpf
-```
-
-已经登录 root 时不要再调用 `sudo`：
-
-```bash
-bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/u1ra/script/main/vps-forward/install.sh | bash' && vpf
-```
-
-### 重复安装和版本处理
-
-安装器会读取 `/usr/local/sbin/vps-forward` 的版本。版本相同时执行幂等检查和修复；版本不一致时显示：
-
-```text
-1. 升级/切换版本（推荐，保留配置和备份）
-2. 重装（保留配置，重建程序、服务和项目规则）
-3. 卸载现有版本（保留配置，不继续安装）
-0. 取消
-```
-
-通过 `curl` 启动时，安装器会重新连接当前终端，因此仍可选择。自动化环境可显式指定：
-
-```bash
-sudo bash install.sh --upgrade
-sudo bash install.sh --reinstall
-sudo bash install.sh --uninstall-existing
-sudo bash install.sh --yes  # 版本不一致时默认升级
-```
-
-升级和重装默认保留 `/etc/vps-forward/` 中的规则、备份和状态；卸载选项也默认保留配置。安装器在启动 systemd/OpenRC 服务前会释放配置锁，避免安装进程与服务进程互相阻塞。
+生产环境建议下载固定 Release 并用随附的 `.sha256` 文件校验后再安装；远程引导器也支持 `VPF_INSTALL_VERSION` 和 `VPF_SHA256` 环境变量。
 
 ## 快速开始
 
-将线路 VPS 的 TCP+UDP `8443` 转发到文档保留地址 `192.0.2.10:20086`，使用默认的精确 Masquerade：
+将线路 VPS 的 TCP+UDP `8443` 转发到落地 VPS（示例使用文档保留地址 `192.0.2.10`，请替换为你的实际 IPv4）：
 
 ```bash
 sudo vps-forward add \
@@ -149,9 +62,7 @@ sudo vps-forward status
 sudo vps-forward doctor
 ```
 
-`192.0.2.0/24` 是文档示例网段。使用时替换为你的落地 VPS IPv4。
-
-关闭 Masquerade：
+关闭 Masquerade（落地 VPS 必须有正确回程路由，否则非对称路由会使转发失败）：
 
 ```bash
 sudo vps-forward add \
@@ -163,46 +74,9 @@ sudo vps-forward add \
   --no-masquerade
 ```
 
-关闭后，落地 VPS 及其上游必须知道如何把客户端流量经线路 VPS 返回；否则非对称路由会使 TCP/UDP 转发失败。
-
 ## 交互菜单
 
-直接运行 `sudo vpf`（或 `sudo vps-forward`）。新版菜单顶部会汇总版本、系统、服务、IPv4 转发、配置和规则数量，功能按“规则管理”“系统与诊断”“数据与维护”分组。终端支持时自动显示颜色；设置 `NO_COLOR=1` 或 `VPF_COLOR=never` 可关闭颜色，`VPF_COLOR=always` 可强制开启。
-
-```text
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  VPS FORWARD  nftables IPv4 四层端口转发管理
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  版本 v0.1.3  系统 debian 12
-  服务 ● 运行中   IPv4 转发 ● 已开启   配置 ● 正常
-  规则 总计 3 / 启用 2 / 禁用 1
-
-  规则管理
-  [1]  初始化 / 修复环境
-  [2]  新增转发规则          [3]  查看转发规则
-  ...
-```
-
-每项操作完成后会停留在结果页面，按 Enter 返回主菜单。主菜单输入 `0` 或 `q` 退出；字段输入提示会显示默认值，输入 `q` 可取消当前输入。删除、恢复、导入和卸载要求再次确认，无效菜单项会重新提示。
-
-| 选项 | 作用 |
-|---|---|
-| `1. 初始化环境` | 检测已安装版本，安装或检查 nftables、iproute2、flock，开启 IPv4 转发，修复程序文件、`vpf` 快捷命令和 systemd/OpenRC 服务，然后重新应用项目规则。版本不一致时提供升级、重装、卸载和取消。 |
-| `2. 新增转发规则` | 依次输入名称、监听 IP/端口、目标 IPv4/端口、TCP/UDP/BOTH 和 Masquerade 模式；校验并原子应用。 |
-| `3. 查看转发规则` | 列出 TSV 中的全部规则，包括 ID、启停状态、协议、监听地址、目标和 Masquerade 模式。 |
-| `4. 修改转发规则` | 先显示指定规则，目前交互模式可修改目标端口；其他字段可使用 `vps-forward edit ID ...` 修改。 |
-| `5. 删除转发规则` | 显示规则详情，输入 `YES` 二次确认后删除，并完整重建项目表，避免残留。 |
-| `6. 启用规则` | 保留原配置并把规则设为启用，随后生成 DNAT、FORWARD 和所需 Masquerade。 |
-| `7. 禁用规则` | 规则仍保留在配置中，但不会生成实际转发规则。 |
-| `8. 查看 nftables 实际规则` | 读取内核中本项目的 NAT 和 filter 表，不显示或修改其他软件的表。 |
-| `9. 检查配置` | 校验配置格式、字段、冲突和候选 nftables 事务；不主动修复。 |
-| `10. 备份配置` | 备份 TSV、生成规则、manifest，以及存在时的服务和 sysctl 文件。 |
-| `11. 恢复配置` | 根据内部备份目录名恢复；恢复前再次备份当前状态并校验候选规则。 |
-| `12. 导入配置` | 从指定绝对路径导入 TSV，校验、备份并应用。 |
-| `13. 导出配置` | 将当前 TSV 原子复制到指定绝对路径，便于迁移。 |
-| `14. 修复或重新应用规则` | 从配置完整重新生成两个项目表，执行 `nft --check` 后原子应用。 |
-| `15. 卸载` | 默认保留配置、备份、sysctl 和 nftables 软件包，只移除项目规则、服务和程序。 |
-| `0. 退出` | 退出管理菜单，不修改配置。 |
+运行 `sudo vpf` 打开菜单。顶部汇总版本、系统、服务、IPv4 转发、配置和规则数量，功能按"规则管理""系统与诊断""数据与维护"分组，覆盖 CLI 的全部能力。设置 `NO_COLOR=1` 或 `VPF_COLOR=never` 关闭颜色，`VPF_COLOR=always` 强制开启。
 
 ## 命令行
 
@@ -220,12 +94,11 @@ sudo vps-forward add \
 | `status [--json]` | 显示系统和项目状态 |
 | `doctor [--json]` | 只读检查常见冲突 |
 | `rules` | 查看两个项目实际表 |
-| `backup` | 建立带 manifest 的内部备份 |
-| `restore NAME --yes` | 恢复内部备份 |
+| `backup` / `restore NAME --yes` | 备份 / 恢复内部备份 |
 | `export --output /abs/file` | 导出 TSV 配置 |
 | `import --input /abs/file --yes` | 校验、备份、导入并应用 |
 | `uninstall --yes [选项]` | 保守卸载 |
-| `help` / `version` | 帮助/版本 |
+| `help` / `version` | 帮助 / 版本 |
 
 规则参数：
 
@@ -240,27 +113,17 @@ sudo vps-forward add \
 | `--masquerade-mode` | `precise`（默认）或 `destination` |
 | `--no-masquerade` | 关闭 Masquerade，不能与上一项同时使用 |
 | `--enabled` / `--disabled` | 新增时默认启用 |
-| `--dry-run` | 在 `/tmp` 显示候选配置、生成规则和事务，不写系统；缺少 nft/权限时会明确降级为结构检查 |
+| `--dry-run` | 在 `/tmp` 显示候选配置、生成规则和事务，不写系统 |
 | `--yes` | 确认 SSH 端口风险或危险操作 |
 | `--quiet` | 减少非错误输出 |
 
-成功退出码为 0；参数、配置或系统错误返回非 0。CLI 不会为缺失的确认参数打开隐藏式交互。
-
-修改、删除示例：
-
-```bash
-sudo vps-forward show 1
-sudo vps-forward edit 1 --target-port 20087 --masquerade-mode destination
-sudo vps-forward disable 1
-sudo vps-forward enable 1
-sudo vps-forward delete 1 --yes
-```
-
 TCP 和 UDP 分别占用协议空间：已有 TCP `8443` 时可新增 UDP `8443`；BOTH 与同地址/端口上的任一 TCP 或 UDP 规则冲突。`any` 与所有具体监听地址重叠。
 
-## nftables 设计
+## 工作原理
 
-配置 `/etc/vps-forward/config.tsv` 是唯一数据源。启用的每条规则生成 DNAT 和 FORWARD；Masquerade 按模式生成。项目不保存动态 handle。
+### 独立的 nftables 表
+
+配置 `/etc/vps-forward/config.tsv` 是唯一数据源。启用的每条规则生成 DNAT 和对应 FORWARD 放行，Masquerade 按模式生成：
 
 ```text
 table ip vps_forward_nat
@@ -271,57 +134,23 @@ table inet vps_forward_filter
 └── forward      (type filter, hook forward, priority -5): 仅项目 DNAT 流量的放行
 ```
 
-实际逻辑（保留地址示例）：
+所有生成规则带 `vps-forward id=... name=...` comment，并用 `ct status dnat` 缩小影响范围。项目绝不执行 `flush ruleset`；如果同名表存在却没有项目所有权标记，操作立即停止。
 
-```nft
-tcp dport 8443 dnat to 192.0.2.10:20086
-udp dport 8443 dnat to 192.0.2.10:20086
+### 原子应用
 
-ct status dnat ip daddr 192.0.2.10 tcp dport 20086 masquerade
-ct status dnat ip daddr 192.0.2.10 udp dport 20086 masquerade
-
-ct status dnat ct state established,related accept
-ct status dnat ip daddr 192.0.2.10 tcp dport 20086 accept
-ct status dnat ip daddr 192.0.2.10 udp dport 20086 accept
-```
-
-这是逻辑示例；真实规则位于上述独立表、带 `vps-forward id=... name=...` comment，并用 `ct status dnat` 缩小影响范围。
+每次修改都在 `flock` 独占锁下完成：生成候选配置和完整项目表 → 验证同名表所有权 → `nft --check` → 自动备份 → 单事务应用并验证 → 失败则恢复之前的项目 ruleset。不会出现只有 DNAT 没有 FORWARD 的中间提交。自动备份默认保留最近 20 份。
 
 ### 三种 Masquerade
 
-1. `precise`：按 DNAT 状态、目标 IP、目标端口和协议匹配，默认且推荐；不会顺带改写发往目标其他端口的流量。
-2. `destination`：按 DNAT 状态和目标 IP 匹配。同一目标 IP 的多个项目规则共享一条生成规则，配置完整重建保证删除一条引用时不会影响其余规则。逻辑为 `ct status dnat ip daddr 192.0.2.10 masquerade`。
-3. `none`：不生成 SNAT/Masquerade。可保留客户端源 IP，但必须自行配置正确回程路由。
+1. `precise`（默认）：按 DNAT 状态、目标 IP、目标端口和协议匹配，影响最小，推荐。
+2. `destination`：按 DNAT 状态和目标 IP 匹配，同一目标 IP 的多条规则共享一条生成规则。
+3. `none`（`--no-masquerade`）：保留客户端源 IP，但必须自行配置回程路由。
 
 ### 与其他防火墙共存
 
-nftables 中，同一个 hook 可有多个 base chain。某个 base chain 的 `accept` 不保证流量最终被全局接受；后续其他 base chain 仍可 `drop`。本项目的 filter base chain 使用 priority `-5`，但不会改变其他 chain 的 policy 或 priority。
+nftables 中同一个 hook 可有多个 base chain，其中一个的 `accept` 不保证流量最终被全局接受。项目只重建带标记的两个表，不改变其他 chain 的 policy 或 priority，因此 UFW、firewalld、Docker 的规则仍可能 drop 转发流量。`doctor` 能报告常见冲突，但无法理解任意第三方规则的完整意图；Docker 在项目服务启动后重建防火墙时可再次 `apply`。
 
-因此：
-
-- 项目绝不执行 `flush ruleset`，只原子删除并重建带项目 marker 的两个表。
-- 如果同名表存在却没有项目 marker，操作立即停止。
-- UFW、firewalld、Docker、Fail2ban 和 iptables-nft 只被 `doctor` 检测，不会被关闭或改写。
-- 其他 chain 若提前或随后 drop，转发仍可能失败。doctor 能报告常见服务、项目表和现有 ruleset，但无法理解任意第三方规则的完整意图。
-- Docker 在项目服务启动后重建防火墙时可能改变结果；可再次 `apply`，并应结合实际启动顺序测试。
-
-## 原子应用与恢复
-
-每次修改：
-
-1. 获取 `flock` 独占锁并校验 TSV；
-2. 在同目录创建权限 0600 的候选文件；
-3. 完整生成两个项目表；
-4. 验证现存同名表所有权；
-5. 构造只删除这两个项目表的 nftables 事务；
-6. 运行 `nft --check --file`；
-7. 自动备份当前配置；
-8. 用 nftables 单事务应用并验证表存在；
-9. 原子替换配置和生成文件；失败则恢复之前项目 ruleset。
-
-不会出现单独增加 DNAT 而未增加 FORWARD 的中间提交。自动备份默认保留最近 20 份。
-
-## 持久化与文件位置
+## 文件位置
 
 | 路径 | 内容 |
 |---|---|
@@ -335,9 +164,9 @@ nftables 中，同一个 hook 可有多个 base chain。某个 base chain 的 `a
 | `/var/log/vps-forward.log` | 操作结果日志 |
 | `/etc/sysctl.d/99-vps-forward.conf` | IPv4 转发持久化 |
 
-systemd 使用独立 `vps-forward.service`，在 `network-online` 和发行版 nftables 服务之后调用 `apply`；OpenRC 使用独立 init script，依赖 `net` 并排在 nftables 之后。服务每次都完整重建项目表，因此重复加载幂等，且不会覆盖发行版主配置文件。
+持久化服务在 `network-online` 和发行版 nftables 服务之后调用 `apply`，每次完整重建项目表，幂等且不覆盖发行版主配置文件。
 
-## 备份、恢复、导入和导出
+## 备份与卸载
 
 ```bash
 sudo vps-forward backup
@@ -346,38 +175,18 @@ sudo vps-forward export --output /root/vps-forward-config.tsv
 sudo vps-forward import --input /root/vps-forward-config.tsv --yes
 ```
 
-内部备份含配置、生成规则、manifest，以及存在时的服务和 sysctl 文件。恢复/导入先校验 schema 和配置、备份当前状态、执行 nft 检查；失败会保留或恢复原状态。restore 只接受备份目录内的严格名称，导入拒绝符号链接。
+内部备份含配置、生成规则、manifest 以及存在时的服务和 sysctl 文件；恢复/导入先校验、备份当前状态、执行 nft 检查。
 
-## 卸载
-
-默认保留配置、备份、nftables 软件包、sysctl 文件和当前 IPv4 转发状态：
+卸载默认保留配置、备份、nftables 软件包、sysctl 文件和 IPv4 转发状态：
 
 ```bash
-sudo vps-forward uninstall --yes --keep-config
+sudo vps-forward uninstall --yes --keep-config   # 默认行为
+sudo vps-forward uninstall --yes --rules-only    # 只移除项目规则，保留程序和服务
+sudo vps-forward uninstall --yes --purge         # 同时删除配置和备份
+# 可选叠加：--remove-sysctl --remove-package
 ```
 
-其他模式：
-
-```bash
-sudo vps-forward uninstall --yes --rules-only
-sudo vps-forward uninstall --yes --purge
-sudo vps-forward uninstall --yes --purge --remove-sysctl
-sudo vps-forward uninstall --yes --purge --remove-sysctl --remove-package
-```
-
-即使删除 sysctl 文件，也不会主动写入 `net.ipv4.ip_forward=0`，避免影响容器、VPN 或其他转发服务。`--remove-package` 可能影响系统其他 nftables 用户，只应在确认后使用。
-
-## 升级
-
-```bash
-git fetch --tags
-git checkout v0.1.3
-sudo ./install.sh
-sudo vps-forward check
-sudo vps-forward apply
-```
-
-升级前先 `backup`。安装器会保留已有 TSV；未来 schema 升级会在 CHANGELOG 说明迁移步骤，未知 schema 会被拒绝而不是猜测处理。
+即使删除 sysctl 文件，也不会主动写入 `net.ipv4.ip_forward=0`，避免影响容器、VPN 或其他转发服务。
 
 ## 故障排查
 
@@ -385,7 +194,7 @@ sudo vps-forward apply
 2. 确认 `/proc/sys/net/ipv4/ip_forward` 为 `1`。
 3. 用 `sudo vps-forward rules` 检查 DNAT、FORWARD、Masquerade。
 4. 检查监听端口是否与 SSH/其他服务重叠：`ss -lntup`。
-5. 检查 UFW/firewalld/其他 nftables base chain 是否 drop。
+5. 检查 UFW/firewalld/其他 nftables base chain 是否 drop，以及云厂商安全组和上游 ACL。
 6. 无 Masquerade 时检查落地 VPS 回程路由。
 7. 检查 `/var/log/vps-forward.log` 和 systemd/OpenRC 日志。
 8. 使用 `sudo vps-forward apply --dry-run` 审计候选事务。
@@ -394,25 +203,13 @@ sudo vps-forward apply
 
 ## 常见问题
 
-**为什么不修改系统 `forward` 链？**
+**为什么不修改系统 `forward` 链？** 为了不改变系统全局 policy 或覆盖 Docker/UFW。项目创建自己的 base chain，并接受其他链仍有最终否决权。
 
-为了不改变系统全局 policy 或覆盖 Docker/UFW。项目创建自己的 base chain，并接受其他链仍有最终否决权。
+**为什么默认 Masquerade？** 多数落地 VPS 不知道客户端网段应经线路 VPS 返回。Masquerade 让回包自然回到线路 VPS；精确模式的影响最小。
 
-**为什么默认 Masquerade？**
+**能保留客户端真实 IP 吗？** 可用 `--no-masquerade`，但必须在落地端配置回程路由。DNAT 本身不会创建该路由。
 
-多数落地 VPS 不知道客户端网段应经线路 VPS 返回。Masquerade 让回包自然回到线路 VPS；精确模式的影响最小。
-
-**能保留客户端真实 IP 吗？**
-
-可用 `--no-masquerade`，但必须在落地端配置回程路由。DNAT 本身不会创建该路由。
-
-**为什么转发规则存在但仍不通？**
-
-常见原因是其他 base chain drop、云厂商安全组、上游 ACL、IPv4 转发未开启、端口冲突或错误回程路由。
-
-**支持 IPv6/端口范围吗？**
-
-v0.1 不支持。配置 schema 和生成器已分层，未来可在不使用 nft handle 的前提下扩展。
+**支持 IPv6/端口范围吗？** v0.1 不支持。配置 schema 和生成器已分层，未来可在不使用 nft handle 的前提下扩展。
 
 ## 开发与测试
 
@@ -423,13 +220,7 @@ shellcheck vps-forward.sh install.sh uninstall.sh lib/*.sh tests/*.sh
 bash tests/run-tests.sh
 ```
 
-测试在隔离临时目录中 mock nftables，不会修改开发机防火墙。参见 [CONTRIBUTING.md](CONTRIBUTING.md)、[SECURITY.md](SECURITY.md) 和 [TODO.md](TODO.md)。
-
-## 仓库发布信息
-
-- 推荐仓库名：`vps-forward`
-- 简介：`Safe nftables IPv4 TCP/UDP port forwarding manager for Ubuntu, Debian and Alpine`
-- Topics：`nftables`, `port-forwarding`, `vps`, `bash`, `linux`, `dnat`, `firewall`, `ubuntu`, `debian`, `alpine-linux`, `systemd`, `openrc`
+测试在隔离临时目录中 mock nftables，不会修改开发机防火墙。参见 [CONTRIBUTING.md](CONTRIBUTING.md)、[SECURITY.md](SECURITY.md)、[CHANGELOG.md](CHANGELOG.md) 和 [TODO.md](TODO.md)。
 
 ## License
 

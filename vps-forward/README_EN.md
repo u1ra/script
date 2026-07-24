@@ -33,16 +33,18 @@ sudo ./install.sh
 Install with Bash and immediately open the interactive menu:
 
 ```bash
-sudo bash install.sh && sudo vps-forward
+sudo bash install.sh && sudo vpf
 ```
 
 For production, use a fixed Release, verify its published SHA256, inspect it, and then run `install.sh`. The convenience command below executes changing network content directly and should only be used if you accept that risk:
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/u1ra/script/main/vps-forward/install.sh | sudo bash' && sudo vps-forward
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/u1ra/script/main/vps-forward/install.sh | sudo bash' && sudo vpf
 ```
 
 On Alpine, the POSIX installer bootstraps Bash before launching the main program.
+
+The installer creates `vpf` as a shortcut that opens the interactive management menu. On repeated installation, equal versions are repaired idempotently. A different version offers upgrade, reinstall, uninstall, or cancel; `--upgrade`, `--reinstall`, `--uninstall-existing`, and `--yes` are available for automation.
 
 ## Quick start
 

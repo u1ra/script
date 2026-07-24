@@ -6,6 +6,12 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/test-helper.sh"
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 VPF="$PROJECT_ROOT/vps-forward.sh"
 
+if [[ "$("$VPF" version)" == "vps-forward 0.1.1" ]]; then
+    pass "源码版本为 0.1.1"
+else
+    fail "源码版本为 0.1.1"
+fi
+
 for platform in ubuntu debian alpine; do
     mkdir -p "$VPF_MOCK_DIR"
     : >"$VPF_MOCK_DIR/actions"
@@ -16,6 +22,8 @@ for platform in ubuntu debian alpine; do
     else
         assert_contains "$platform systemd 分支" "$VPF_MOCK_DIR/actions" "service=systemd"
     fi
+    assert_contains "$platform 启动服务前已释放安装锁" "$VPF_MOCK_DIR/actions" "service-restart-lock=free"
+    assert_false "$platform 未发生服务自锁" grep -Fq 'service-restart-lock=held' "$VPF_MOCK_DIR/actions"
 done
 
 before="$(sha256sum "$VPF_CONFIG_FILE")"
@@ -37,7 +45,49 @@ if [[ -f "$VPF_MOCK_DIR/usr/local/lib/vps-forward/vps-forward-core.sh" ]]; then
 else
     fail "安装核心库"
 fi
+if [[ -L "$VPF_MOCK_DIR/usr/local/bin/vpf" &&
+    "$(readlink "$VPF_MOCK_DIR/usr/local/bin/vpf")" == ../sbin/vps-forward ]]; then
+    pass "安装 vpf 快捷管理命令"
+else
+    fail "安装 vpf 快捷管理命令"
+fi
 assert_contains "开启 IPv4 转发动作" "$VPF_MOCK_DIR/actions" 'sysctl=net.ipv4.ip_forward=1'
+
+# 版本不一致且 --yes 时默认安全升级并保留配置。
+printf '0.1.0\n' >"$VPF_MOCK_DIR/installed-version"
+: >"$VPF_MOCK_DIR/actions"
+upgrade_before="$(sha256sum "$VPF_CONFIG_FILE")"
+VPF_TEST_PLATFORM=debian "$VPF" install --yes
+upgrade_after="$(sha256sum "$VPF_CONFIG_FILE")"
+assert_contains "版本不一致默认选择升级" "$VPF_MOCK_DIR/actions" 'version-action=upgrade'
+if [[ "$upgrade_before" == "$upgrade_after" ]]; then
+    pass "升级保留配置"
+else
+    fail "升级保留配置"
+fi
+if [[ "$(<"$VPF_MOCK_DIR/installed-version")" == "0.1.1" ]]; then
+    pass "升级写入新版本"
+else
+    fail "升级写入新版本"
+fi
+
+# 重装会先保守卸载，再恢复程序、快捷命令和项目规则。
+printf '0.1.0\n' >"$VPF_MOCK_DIR/installed-version"
+: >"$VPF_MOCK_DIR/actions"
+VPF_TEST_PLATFORM=debian "$VPF" install --reinstall --yes
+assert_contains "版本不一致可选择重装" "$VPF_MOCK_DIR/actions" 'version-action=reinstall'
+assert_contains "重装先卸载旧程序" "$VPF_MOCK_DIR/actions" 'uninstall-program=1'
+if [[ -L "$VPF_MOCK_DIR/usr/local/bin/vpf" && -f "$VPF_MOCK_DIR/active.nft" ]]; then
+    pass "重装恢复快捷命令和规则"
+else
+    fail "重装恢复快捷命令和规则"
+fi
+
+if VPF_TEST_PLATFORM=debian "$VPF" install --upgrade --reinstall --yes >/dev/null 2>&1; then
+    fail "拒绝冲突的版本操作"
+else
+    pass "拒绝冲突的版本操作"
+fi
 
 "$VPF" uninstall --rules-only --yes
 if [[ ! -e "$VPF_MOCK_DIR/active.nft" ]]; then
@@ -52,12 +102,19 @@ else
 fi
 
 VPF_TEST_PLATFORM=debian "$VPF" install --yes
-"$VPF" uninstall --keep-config --yes
-assert_contains "保守卸载删除程序动作" "$VPF_MOCK_DIR/actions" 'uninstall-program=1'
+: >"$VPF_MOCK_DIR/actions"
+VPF_TEST_PLATFORM=debian "$VPF" install --uninstall-existing --yes
+assert_contains "重复安装可选择卸载" "$VPF_MOCK_DIR/actions" 'version-action=uninstall'
+assert_contains "卸载旧程序动作" "$VPF_MOCK_DIR/actions" 'uninstall-program=1'
 if [[ -f "$VPF_CONFIG_FILE" ]]; then
-    pass "保守卸载保留配置"
+    pass "版本卸载保留配置"
 else
-    fail "保守卸载保留配置"
+    fail "版本卸载保留配置"
+fi
+if [[ ! -e "$VPF_MOCK_DIR/installed-version" && ! -L "$VPF_MOCK_DIR/usr/local/bin/vpf" ]]; then
+    pass "版本卸载移除程序和快捷命令"
+else
+    fail "版本卸载移除程序和快捷命令"
 fi
 
 printf '1..%d\n' "$TESTS_RUN"

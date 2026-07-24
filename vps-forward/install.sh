@@ -19,6 +19,16 @@ die() {
     exit 1
 }
 
+run_main_installer() {
+    main_script="$1"
+    shift
+    if [ -c /dev/tty ] && (: </dev/tty) 2>/dev/null; then
+        bash "$main_script" install "$@" </dev/tty
+    else
+        bash "$main_script" install "$@"
+    fi
+}
+
 [ "$(id -u)" -eq 0 ] || die "安装需要 root 权限，请使用 sudo ./install.sh"
 [ -r /etc/os-release ] || die "无法识别系统：缺少 /etc/os-release"
 
@@ -52,7 +62,8 @@ esac
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)
 if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/vps-forward.sh" ] &&
     [ -f "$SCRIPT_DIR/lib/vps-forward-core.sh" ]; then
-    exec bash "$SCRIPT_DIR/vps-forward.sh" install "$@"
+    run_main_installer "$SCRIPT_DIR/vps-forward.sh" "$@"
+    exit $?
 fi
 
 command -v tar >/dev/null 2>&1 || die "远程安装需要 tar"
@@ -94,4 +105,4 @@ if [ -f "$SOURCE_DIR/vps-forward/vps-forward.sh" ] &&
 fi
 [ -f "$SOURCE_DIR/vps-forward.sh" ] || die "下载包中缺少 vps-forward.sh"
 [ -f "$SOURCE_DIR/lib/vps-forward-core.sh" ] || die "下载包中缺少核心库"
-bash "$SOURCE_DIR/vps-forward.sh" install "$@"
+run_main_installer "$SOURCE_DIR/vps-forward.sh" "$@"

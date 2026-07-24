@@ -34,7 +34,7 @@ vps-forward - 安全管理 nftables IPv4 四层端口转发
   vps-forward                    打开交互菜单
 
 命令:
-  install                        安装依赖、程序、IPv4 转发和启动服务
+  install [版本操作]             安装依赖、程序、IPv4 转发和启动服务
   add                            新增规则
   list [--json]                  列出规则
   show <ID> [--json]             查看规则
@@ -67,6 +67,12 @@ vps-forward - 安全管理 nftables IPv4 四层端口转发
   --dry-run                      只显示候选配置、规则和操作
   --yes                          确认 SSH 端口等风险
   --quiet                        减少普通输出
+
+重复安装的版本操作:
+  --upgrade                      保留配置并升级/切换到源码版本
+  --reinstall                    保留配置，卸载程序和项目表后重新安装
+  --uninstall-existing           卸载现有版本后停止，不继续安装
+  --yes                          无交互且版本不一致时默认选择升级
 
 卸载选项:
   --rules-only                   只删除项目 nftables 表
@@ -754,6 +760,81 @@ install_packages() {
     esac
 }
 
+detect_installed_version() {
+    local program=/usr/local/sbin/vps-forward output version
+    if [[ "$VPF_SYSTEM_MODE" == "mock" ]]; then
+        if [[ -n "${VPF_MOCK_INSTALLED_VERSION:-}" ]]; then
+            printf '%s\n' "$VPF_MOCK_INSTALLED_VERSION"
+            return 0
+        fi
+        if [[ -f "$VPF_MOCK_DIR/installed-version" ]]; then
+            read -r version <"$VPF_MOCK_DIR/installed-version"
+            printf '%s\n' "$version"
+            return 0
+        fi
+        return 2
+    fi
+    if [[ ! -e "$program" && ! -L "$program" ]]; then
+        return 2
+    fi
+    [[ -f "$program" && ! -L "$program" ]] || {
+        vpf_die "检测到不安全的已安装程序路径: $program"
+        return 1
+    }
+    grep -Fq '# vps-forward managed program' "$program" || {
+        vpf_die "检测到同名但不属于本项目的程序: $program"
+        return 1
+    }
+    output="$("$program" version 2>/dev/null)" || {
+        vpf_die "无法读取已安装 vps-forward 的版本"
+        return 1
+    }
+    version="${output#vps-forward }"
+    [[ "$version" =~ ^[0-9]+([.][0-9A-Za-z-]+)+$ ]] || {
+        vpf_die "已安装程序返回了无效版本: $output"
+        return 1
+    }
+    printf '%s\n' "$version"
+}
+
+choose_install_action() {
+    local installed_version="$1" requested_action="$2" choice
+    if [[ -n "$requested_action" ]]; then
+        printf '%s\n' "$requested_action"
+        return 0
+    fi
+    if [[ "$installed_version" == "$VPF_VERSION" ]]; then
+        printf 'repair\n'
+        return 0
+    fi
+    if [[ "$VPF_ASSUME_YES" == "1" ]]; then
+        printf 'upgrade\n'
+        return 0
+    fi
+    [[ -t 0 ]] || {
+        vpf_die "检测到版本 $installed_version，与待安装版本 $VPF_VERSION 不一致；无交互环境请指定 --upgrade、--reinstall 或 --uninstall-existing"
+        return 1
+    }
+    while true; do
+        {
+            printf '\n检测到已安装 vps-forward %s，当前源码版本为 %s。\n' "$installed_version" "$VPF_VERSION"
+            printf '1. 升级/切换版本（推荐，保留配置和备份）\n'
+            printf '2. 重装（保留配置，重建程序、服务和项目规则）\n'
+            printf '3. 卸载现有版本（保留配置，不继续安装）\n'
+            printf '0. 取消\n'
+            printf '请选择 [1]: '
+        } >&2
+        read -r choice || return 1
+        case "${choice:-1}" in
+            1) printf 'upgrade\n'; return 0 ;;
+            2) printf 'reinstall\n'; return 0 ;;
+            3) printf 'uninstall\n'; return 0 ;;
+            0) printf 'cancel\n'; return 0 ;;
+            *) vpf_warn "无效选择，请重新输入。" ;;
+        esac
+    done
+}
+
 write_owned_file() {
     local source="$1" destination="$2" marker="$3"
     if [[ -e "$destination" ]]; then
@@ -765,11 +846,16 @@ write_owned_file() {
 
 install_program_files() {
     local main_source="$SCRIPT_DIR/vps-forward.sh" core_source="$SCRIPT_DIR/lib/vps-forward-core.sh"
+    local shortcut=/usr/local/bin/vpf
     [[ -f "$main_source" && -f "$core_source" ]] || vpf_die "请从完整源码目录运行 install"
     if [[ "$VPF_SYSTEM_MODE" == "mock" ]]; then
-        mkdir -p "$VPF_MOCK_DIR/usr/local/sbin" "$VPF_MOCK_DIR/usr/local/lib/vps-forward"
+        mkdir -p "$VPF_MOCK_DIR/usr/local/sbin" "$VPF_MOCK_DIR/usr/local/bin" \
+            "$VPF_MOCK_DIR/usr/local/lib/vps-forward"
         cp -- "$main_source" "$VPF_MOCK_DIR/usr/local/sbin/vps-forward"
         cp -- "$core_source" "$VPF_MOCK_DIR/usr/local/lib/vps-forward/"
+        rm -f -- "$VPF_MOCK_DIR/usr/local/bin/vpf"
+        ln -s ../sbin/vps-forward "$VPF_MOCK_DIR/usr/local/bin/vpf"
+        printf '%s\n' "$VPF_VERSION" >"$VPF_MOCK_DIR/installed-version"
         return
     fi
     if [[ -e /usr/local/sbin/vps-forward ]]; then
@@ -789,9 +875,17 @@ install_program_files() {
         (! -d /usr/local/lib/vps-forward || -L /usr/local/lib/vps-forward) ]]; then
         vpf_die "拒绝使用不安全的核心库目录: /usr/local/lib/vps-forward"
     fi
+    if [[ -e "$shortcut" || -L "$shortcut" ]]; then
+        [[ -L "$shortcut" && "$(readlink "$shortcut")" == /usr/local/sbin/vps-forward ]] ||
+            vpf_die "拒绝覆盖已存在的快捷命令: $shortcut"
+    fi
     install -d -m 755 /usr/local/lib/vps-forward
+    install -d -m 755 /usr/local/bin
     install -m 755 "$main_source" /usr/local/sbin/vps-forward
     install -m 644 "$core_source" /usr/local/lib/vps-forward/vps-forward-core.sh
+    if [[ ! -L "$shortcut" ]]; then
+        ln -s /usr/local/sbin/vps-forward "$shortcut"
+    fi
 }
 
 enable_ipv4_forward() {
@@ -875,17 +969,74 @@ EOF
     fi
 }
 
+restart_installed_service() {
+    local platform="$1"
+    if [[ "$VPF_SYSTEM_MODE" == "mock" ]]; then
+        exec 8>"$VPF_LOCK_FILE"
+        if flock -n 8; then
+            printf 'service-restart-lock=free\n' >>"$VPF_MOCK_DIR/actions"
+            flock -u 8
+            exec 8>&-
+            return 0
+        fi
+        printf 'service-restart-lock=held\n' >>"$VPF_MOCK_DIR/actions"
+        exec 8>&-
+        return 1
+    fi
+    if command -v systemctl >/dev/null 2>&1 && [[ "$platform" != "alpine" ]]; then
+        systemctl restart vps-forward.service
+    elif command -v rc-service >/dev/null 2>&1; then
+        rc-service vps-forward restart
+    fi
+}
+
 cmd_install() {
-    local platform
+    local platform installed_version="" version_status=0 requested_action="" action="" action_count=0
     while (($#)); do
         case "$1" in
             --yes|--quiet) set_common_flag "$1"; shift ;;
+            --upgrade) requested_action=upgrade; ((action_count += 1)); shift ;;
+            --reinstall) requested_action=reinstall; ((action_count += 1)); shift ;;
+            --uninstall-existing) requested_action=uninstall; ((action_count += 1)); shift ;;
             *) vpf_die "install 的未知参数: $1" ;;
         esac
     done
+    ((action_count <= 1)) || vpf_die "install 的版本操作参数不能同时使用"
     vpf_require_root install
     platform="$(detect_platform)"
     [[ "$VPF_SYSTEM_MODE" != "mock" ]] || mkdir -p "$VPF_MOCK_DIR"
+    if installed_version="$(detect_installed_version)"; then
+        action="$(choose_install_action "$installed_version" "$requested_action")" || return
+        if [[ "$VPF_SYSTEM_MODE" == "mock" ]]; then
+            printf 'version-action=%s\n' "$action" >>"$VPF_MOCK_DIR/actions"
+        fi
+        case "$action" in
+            cancel)
+                vpf_info "已取消安装。"
+                return 0
+                ;;
+            uninstall)
+                cmd_uninstall --yes --keep-config
+                vpf_release_lock
+                vpf_info "已卸载 vps-forward $installed_version，配置和备份已保留。"
+                return 0
+                ;;
+            reinstall)
+                vpf_info "将重装 vps-forward：$installed_version -> $VPF_VERSION"
+                cmd_uninstall --yes --keep-config
+                vpf_release_lock
+                ;;
+            upgrade)
+                vpf_info "将升级/切换 vps-forward：$installed_version -> $VPF_VERSION，并保留配置。"
+                ;;
+            repair)
+                vpf_info "检测到相同版本 $VPF_VERSION，将执行幂等检查和修复。"
+                ;;
+        esac
+    else
+        version_status=$?
+        [[ "$version_status" == "2" ]] || return "$version_status"
+    fi
     install_packages "$platform"
     vpf_acquire_lock
     vpf_ensure_config
@@ -893,19 +1044,18 @@ cmd_install() {
     enable_ipv4_forward
     install_service "$platform"
     vpf_apply_current
-    if [[ "$VPF_SYSTEM_MODE" == "real" ]]; then
-        if command -v systemctl >/dev/null 2>&1 && [[ "$platform" != "alpine" ]]; then
-            systemctl restart vps-forward.service
-        elif command -v rc-service >/dev/null 2>&1; then
-            rc-service vps-forward restart
-        fi
-    fi
-    vpf_info "安装完成。建议运行 vps-forward doctor，并保留当前 SSH 会话和 VPS 控制台。"
+    vpf_release_lock
+    restart_installed_service "$platform"
+    vpf_info "安装完成。输入 vpf 或 vps-forward 可打开管理页面。"
+    vpf_info "建议运行 vps-forward doctor，并保留当前 SSH 会话和 VPS 控制台。"
 }
 
 remove_service_and_program() {
     if [[ "$VPF_SYSTEM_MODE" == "mock" ]]; then
         printf 'uninstall-program=1\n' >>"$VPF_MOCK_DIR/actions"
+        rm -f -- "$VPF_MOCK_DIR/usr/local/bin/vpf" "$VPF_MOCK_DIR/installed-version" \
+            "$VPF_MOCK_DIR/usr/local/sbin/vps-forward" \
+            "$VPF_MOCK_DIR/usr/local/lib/vps-forward/vps-forward-core.sh"
         return
     fi
     if [[ -f /etc/systemd/system/vps-forward.service ]] &&
@@ -918,6 +1068,9 @@ remove_service_and_program() {
         rc-service vps-forward stop 2>/dev/null || true
         rc-update del vps-forward default 2>/dev/null || true
         rm -f -- /etc/init.d/vps-forward
+    fi
+    if [[ -L /usr/local/bin/vpf && "$(readlink /usr/local/bin/vpf)" == /usr/local/sbin/vps-forward ]]; then
+        rm -f -- /usr/local/bin/vpf
     fi
     if [[ -f /usr/local/sbin/vps-forward && ! -L /usr/local/sbin/vps-forward ]] &&
         grep -Fq '# vps-forward managed program' /usr/local/sbin/vps-forward; then

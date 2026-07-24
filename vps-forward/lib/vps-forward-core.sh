@@ -3,7 +3,7 @@
 
 # vps-forward 核心库。主程序负责启用严格模式，本文件也可由测试直接加载。
 
-VPF_VERSION="${VPF_VERSION:-0.1.0}"
+VPF_VERSION="${VPF_VERSION:-0.1.1}"
 VPF_SCHEMA="vps-forward-config-v1"
 VPF_MARK="vps-forward managed table v1"
 
@@ -113,6 +113,12 @@ vpf_acquire_lock() {
         vpf_die "另一个 vps-forward 实例正在修改配置"
         return
     fi
+}
+
+vpf_release_lock() {
+    # 安装流程启动 systemd/OpenRC 子进程前必须释放锁，否则子进程会与父进程自锁。
+    flock -u 9 2>/dev/null || true
+    exec 9>&-
 }
 
 vpf_make_tmp() {

@@ -51,10 +51,15 @@ sudo ./install.sh
 在 `script/vps-forward` 源码目录中执行：
 
 ```bash
-sudo bash install.sh && sudo vps-forward
+sudo bash install.sh && sudo vpf
 ```
 
-第一条命令安装环境和持久化服务；安装成功后，第二条命令立即打开交互菜单。也可以不安装直接运行源码菜单：
+第一条命令安装环境和持久化服务，并创建两个管理命令：
+
+- `vpf`：快捷命令，直接打开管理菜单；
+- `vps-forward`：完整命令，同样可打开菜单，也可使用 CLI 子命令。
+
+安装成功后，第二条命令立即打开交互菜单。也可以不安装直接运行源码菜单：
 
 ```bash
 sudo bash vps-forward.sh
@@ -67,7 +72,7 @@ sudo bash vps-forward.sh
 发布 Release 后，下载固定标签而不是 `main`，并使用该 Release 附带的校验文件：
 
 ```bash
-VERSION=v0.1.0
+VERSION=v0.1.1
 curl -fLO "https://github.com/u1ra/script/releases/download/${VERSION}/vps-forward-${VERSION}.tar.gz"
 curl -fLO "https://github.com/u1ra/script/releases/download/${VERSION}/vps-forward-${VERSION}.tar.gz.sha256"
 sha256sum -c "vps-forward-${VERSION}.tar.gz.sha256"
@@ -80,7 +85,7 @@ sudo ./install.sh
 可给远程引导器指定版本和期望散列：
 
 ```bash
-sudo env VPF_INSTALL_VERSION=v0.1.0 VPF_SHA256='<release-sha256>' ./install.sh
+sudo env VPF_INSTALL_VERSION=v0.1.1 VPF_SHA256='<release-sha256>' ./install.sh
 ```
 
 ### 使用 curl 一键安装并启动
@@ -88,7 +93,7 @@ sudo env VPF_INSTALL_VERSION=v0.1.0 VPF_SHA256='<release-sha256>' ./install.sh
 GitHub 仓库公开后执行：
 
 ```bash
-bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/u1ra/script/main/vps-forward/install.sh | sudo bash' && sudo vps-forward
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/u1ra/script/main/vps-forward/install.sh | sudo bash' && sudo vpf
 ```
 
 `bash -o pipefail` 可确保下载失败时整条安装流水线返回失败；安装成功后才会启动 `vps-forward` 菜单。不过，`curl | bash` 仍会直接执行网络内容，无法让你先审计，且默认分支内容可变化。它只适合了解风险的临时环境；生产环境应使用上面的固定版本、审查和 SHA256 流程。
@@ -96,8 +101,36 @@ bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/u1ra/script/ma
 全新 Alpine 尚未安装 Bash 时，可让 POSIX `sh` 运行引导器：
 
 ```sh
-tmp_file="$(mktemp)" && curl -fsSL https://raw.githubusercontent.com/u1ra/script/main/vps-forward/install.sh -o "$tmp_file" && sudo sh "$tmp_file" && rm -f "$tmp_file" && sudo vps-forward
+tmp_file="$(mktemp)" && curl -fsSL https://raw.githubusercontent.com/u1ra/script/main/vps-forward/install.sh -o "$tmp_file" && sudo sh "$tmp_file" && rm -f "$tmp_file" && sudo vpf
 ```
+
+已经登录 root 时不要再调用 `sudo`：
+
+```bash
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/u1ra/script/main/vps-forward/install.sh | bash' && vpf
+```
+
+### 重复安装和版本处理
+
+安装器会读取 `/usr/local/sbin/vps-forward` 的版本。版本相同时执行幂等检查和修复；版本不一致时显示：
+
+```text
+1. 升级/切换版本（推荐，保留配置和备份）
+2. 重装（保留配置，重建程序、服务和项目规则）
+3. 卸载现有版本（保留配置，不继续安装）
+0. 取消
+```
+
+通过 `curl` 启动时，安装器会重新连接当前终端，因此仍可选择。自动化环境可显式指定：
+
+```bash
+sudo bash install.sh --upgrade
+sudo bash install.sh --reinstall
+sudo bash install.sh --uninstall-existing
+sudo bash install.sh --yes  # 版本不一致时默认升级
+```
+
+升级和重装默认保留 `/etc/vps-forward/` 中的规则、备份和状态；卸载选项也默认保留配置。安装器在启动 systemd/OpenRC 服务前会释放配置锁，避免安装进程与服务进程互相阻塞。
 
 ## 快速开始
 
@@ -134,7 +167,7 @@ sudo vps-forward add \
 
 ## 交互菜单
 
-直接运行 `sudo vps-forward`。菜单包含初始化、新增、查看、修改、删除、启停、查看实际规则、检查、备份、恢复、导入、导出、重新应用和卸载。输入提示会显示默认值；`q` 可取消当前输入；删除、恢复、导入和卸载要求再次确认。无效菜单项会重新提示。
+直接运行 `sudo vpf`（或 `sudo vps-forward`）。菜单包含初始化、新增、查看、修改、删除、启停、查看实际规则、检查、备份、恢复、导入、导出、重新应用和卸载。输入提示会显示默认值；`q` 可取消当前输入；删除、恢复、导入和卸载要求再次确认。无效菜单项会重新提示。
 
 ## 命令行
 

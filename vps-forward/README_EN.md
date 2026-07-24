@@ -1,32 +1,49 @@
 # vps-forward
 
-[中文](README.md) · nftables IPv4 L4 port-forwarding manager
+[中文](README.md) · nftables IPv4 port-forwarding manager
 
 ![CI](https://github.com/u1ra/script/actions/workflows/shellcheck.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
-`vps-forward` is a Bash tool for freshly provisioned VPSes that manages TCP, UDP, or TCP+UDP single-port forwarding from a relay VPS to a destination VPS using its own dedicated nftables tables. A local config file is the single source of truth; every change rebuilds the project's rules through an atomic nftables transaction. It never flushes the global ruleset and never touches tables owned by Docker, UFW, firewalld, Fail2ban, or the user.
+`vps-forward` sets up port forwarding on a VPS: traffic arriving at a TCP/UDP port on the **relay VPS** (the machine running this tool) is forwarded to a given port on the **destination VPS** (the machine actually running the service). Typical uses: optimizing the entry route, hiding the backend address, or funneling several services through one entry point.
+
+It is written in Bash. All rules live in two dedicated nftables tables owned by the tool and are managed from a single config file. Every change is applied as one complete transaction with automatic rollback on failure; the tool never flushes the system firewall and never touches tables owned by Docker, UFW, firewalld, or Fail2ban.
 
 > [!CAUTION]
 > Firewall changes can disconnect a VPS. Keep the current SSH session open and make sure console access or another emergency login is available before making changes. The software is provided as-is; the authors are not liable for disconnections, data loss, or outages caused by misconfiguration.
 
+## How it works at a glance
+
+```text
+client ──► relay VPS (this tool) ──────► destination VPS
+           listens on port 8443        forwards to 192.0.2.10:20086
+```
+
+- Clients only ever connect to the relay VPS; the destination VPS address stays invisible to them.
+- Masquerade is on by default: the source address of forwarded packets is rewritten to the relay's own address, so replies from the destination naturally return via the relay with zero configuration on the destination side. The trade-off is that the destination sees the relay's IP as the client. To preserve real client IPs, use `--no-masquerade` — but then you must configure the return route on the destination yourself.
+
 ## Features
 
-- TCP, UDP, or BOTH; listen on all addresses or a specific local IPv4
-- Three Masquerade modes: precise (default), destination-only, or disabled
-- Interactive menu (`vpf`) and an automation-friendly CLI with JSON output
-- Atomic apply: `flock` locking, candidate files, `nft --check`, automatic backups, rollback on failure
-- Independent systemd / OpenRC persistence services, no reliance on `/etc/nftables.conf`
-- Read-only `doctor` diagnostics for UFW, firewalld, Docker, Fail2ban, and iptables-nft conflicts
-- Backup, restore, import, export, and a conservative uninstaller
+- Forward TCP, UDP, or both; listen on all addresses or one specific local IPv4
+- Three source-address modes: precise Masquerade (default, recommended), per-destination-IP Masquerade, or off
+- Two interfaces: an interactive menu (`vpf`) and a CLI with JSON output for scripting
+- Self-healing changes: automatic backup before each change, `nft --check` preflight, automatic rollback on failure
+- Rules restored on boot: dedicated systemd / OpenRC service, no reliance on the distribution's `/etc/nftables.conf`
+- `doctor` command: read-only diagnostics for common conflicts with UFW, firewalld, Docker, Fail2ban, and iptables-nft
+- Full backup, restore, import, export, and a conservative uninstaller
 
-Supported systems: Ubuntu and Debian (`apt` + systemd), Alpine Linux (`apk` + OpenRC). The main program requires Bash; on Alpine without Bash, the POSIX `sh` installer bootstraps it.
+## Supported systems
 
-Only single IPv4 ports are supported in v0.1. Hostnames, IPv6, port ranges, load balancing, transparent proxying, PROXY Protocol, and one-to-many forwarding are out of scope.
+- Ubuntu / Debian (`apt` + systemd)
+- Alpine Linux (`apk` + OpenRC)
+
+The main program requires Bash; Alpine has no Bash by default, so `install.sh` is a POSIX sh script that bootstraps it.
+
+v0.1 forwards single IPv4 ports only. Hostnames, IPv6, port ranges, load balancing, transparent proxying, PROXY Protocol, and one-to-many forwarding are not supported.
 
 ## Install
 
-The recommended path is to clone, inspect, then run:
+Recommended: clone, read the scripts, then run (they need root and modify the firewall — worth a look first):
 
 ```bash
 git clone https://github.com/u1ra/script.git
@@ -35,19 +52,24 @@ less install.sh vps-forward.sh lib/vps-forward-core.sh
 sudo ./install.sh && sudo vpf
 ```
 
-One-liner install (available once the repository is public; it executes network content directly and is only suitable for throwaway environments where you accept that risk):
+One-liner install (only if you understand the risks of `curl | bash`):
 
 ```bash
 bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/u1ra/script/main/vps-forward/install.sh | sudo bash' && sudo vpf
 ```
 
-The installer installs nftables, iproute2, and util-linux, places the program under `/usr/local`, writes a project sysctl file, creates the independent persistence service, and provides two commands: `vpf` (opens the management menu) and `vps-forward` (menu + CLI subcommands). Reinstalling keeps the configuration; when versions differ you can choose upgrade, reinstall, uninstall, or cancel — `--upgrade`, `--reinstall`, `--uninstall-existing`, and `--yes` are available for automation.
+What the installer does: installs the nftables, iproute2, and util-linux dependencies; places the program under `/usr/local`; writes the sysctl config that enables IPv4 forwarding; creates the boot-time persistence service. Afterwards two commands are available:
 
-For production, download a pinned Release, verify it with the accompanying `.sha256` file, then install. The remote bootstrapper also honors the `VPF_INSTALL_VERSION` and `VPF_SHA256` environment variables.
+- `vpf`: opens the interactive management menu
+- `vps-forward`: the same program with all CLI subcommands
+
+Reinstalling keeps your configuration. When versions differ you can choose upgrade, reinstall, uninstall, or cancel — `--upgrade`, `--reinstall`, `--uninstall-existing`, and `--yes` are available for automation.
+
+For production, download a pinned Release, verify it against the accompanying `.sha256` file, then install. The remote bootstrap script also honors the `VPF_INSTALL_VERSION` and `VPF_SHA256` environment variables.
 
 ## Quick start
 
-Forward TCP+UDP `8443` on the relay VPS to the destination VPS (the example uses the documentation-reserved address `192.0.2.10`; replace it with your real IPv4):
+Forward TCP+UDP port 8443 on the relay VPS to the destination VPS. The example IP `192.0.2.10` is a documentation-reserved address — replace it with your real IPv4:
 
 ```bash
 sudo vps-forward add \
@@ -56,13 +78,17 @@ sudo vps-forward add \
   --target-ip 192.0.2.10 \
   --target-port 20086 \
   --protocol both
-
-sudo vps-forward list
-sudo vps-forward status
-sudo vps-forward doctor
 ```
 
-Disable Masquerade (the destination VPS must have a correct return route, otherwise asymmetric routing breaks forwarding):
+Then verify:
+
+```bash
+sudo vps-forward list     # show rules
+sudo vps-forward status   # overall status
+sudo vps-forward doctor   # health check: common firewall conflicts
+```
+
+To preserve real client IPs (Masquerade off):
 
 ```bash
 sudo vps-forward add \
@@ -74,26 +100,30 @@ sudo vps-forward add \
   --no-masquerade
 ```
 
+Note: with Masquerade off, replies from the destination VPS must route back through the relay VPS. Otherwise replies take a different path (asymmetric routing) and forwarding breaks.
+
 ## Interactive menu
 
-Run `sudo vpf` to open the menu. The header summarizes version, system, service state, IPv4 forwarding, configuration, and rule counts. Actions are grouped into rule management, system & diagnostics, and data & maintenance, covering everything the CLI can do. Set `NO_COLOR=1` or `VPF_COLOR=never` to disable colors, or `VPF_COLOR=always` to force them on.
+Run `sudo vpf`. The header summarizes version, system, service state, the IPv4 forwarding switch, and rule/config counts. Actions are grouped into rule management, system & diagnostics, and data & maintenance — everything the CLI can do.
 
-## CLI
+Colors: set `NO_COLOR=1` or `VPF_COLOR=never` to disable, `VPF_COLOR=always` to force on.
+
+## Command reference
 
 | Command | Purpose |
 |---|---|
-| `install` | Install dependencies, program, sysctl, and persistence service |
-| `add [options]` | Add a rule and apply atomically |
-| `list [--json]` | List rules |
+| `install` | Install dependencies, program, sysctl config, and persistence service |
+| `add [options]` | Add a rule and apply it immediately |
+| `list [--json]` | List all rules |
 | `show ID [--json]` | Show one rule |
-| `edit ID [options]` | Modify and fully rebuild the project tables |
+| `edit ID [options]` | Modify a rule and re-apply |
 | `delete ID --yes` | Delete a rule |
 | `enable ID` / `disable ID` | Enable/disable; disabled rules stay in the config |
-| `apply [--dry-run]` | Regenerate, check, and apply |
-| `check` | Validate config and the candidate nftables transaction |
+| `apply [--dry-run]` | Regenerate and apply rules from the current config |
+| `check` | Validate the config and the nftables transaction that would be applied |
 | `status [--json]` | Show system and project status |
-| `doctor [--json]` | Read-only checks for common conflicts |
-| `rules` | Show the two live project tables |
+| `doctor [--json]` | Read-only checks for common firewall conflicts |
+| `rules` | Show the project's two live nftables tables |
 | `backup` / `restore NAME --yes` | Back up / restore an internal backup |
 | `export --output /abs/file` | Export the TSV config |
 | `import --input /abs/file --yes` | Validate, back up, import, and apply |
@@ -113,17 +143,17 @@ Rule options:
 | `--masquerade-mode` | `precise` (default) or `destination` |
 | `--no-masquerade` | Disable Masquerade; mutually exclusive with the previous option |
 | `--enabled` / `--disabled` | New rules are enabled by default |
-| `--dry-run` | Show candidate config, generated rules, and transaction in `/tmp` without touching the system |
+| `--dry-run` | Only generate candidate config and rules in `/tmp` for review; does not touch the system |
 | `--yes` | Confirm SSH-port risk or dangerous operations |
 | `--quiet` | Reduce non-error output |
 
-TCP and UDP occupy separate protocol spaces: UDP `8443` can coexist with TCP `8443`; BOTH conflicts with any TCP or UDP rule on the same address/port. `any` overlaps with every specific listen address.
+Port-conflict rules: the same port number can be used once for TCP and once for UDP (UDP 8443 is fine alongside TCP 8443); `both` conflicts with any TCP or UDP rule on the same address/port; a listen address of `any` conflicts with every specific IP.
 
 ## How it works
 
 ### Dedicated nftables tables
 
-The config `/etc/vps-forward/config.tsv` is the single source of truth. Every enabled rule generates a DNAT plus a matching FORWARD accept; Masquerade rules are generated per mode:
+`/etc/vps-forward/config.tsv` is the single source of truth. Each enabled rule generates two things: a DNAT (rewrites the packet's destination) and a FORWARD accept; Masquerade rules depend on the selected mode. Everything lives in two tables owned by the project:
 
 ```text
 table ip vps_forward_nat
@@ -131,24 +161,28 @@ table ip vps_forward_nat
 └── postrouting  (type nat, hook postrouting, priority srcnat): Masquerade
 
 table inet vps_forward_filter
-└── forward      (type filter, hook forward, priority -5): accepts only project DNAT traffic
+└── forward      (type filter, hook forward, priority -5): accepts only this tool's DNAT traffic
 ```
 
-All generated rules carry a `vps-forward id=... name=...` comment and use `ct status dnat` to narrow their scope. The project never runs `flush ruleset`; if a same-named table exists without the project ownership marker, the operation stops immediately.
+Every generated rule carries a `vps-forward id=... name=...` comment for identification and uses `ct status dnat` to limit matching to traffic this tool actually forwards. The project never runs `flush ruleset`; if a same-named table exists without the project's ownership marker, the operation stops with an error instead of overwriting it.
 
-### Atomic apply
+### Atomic apply: never a half-applied state
 
-Every change runs under an exclusive `flock`: generate candidate config and complete project tables → verify ownership of existing same-named tables → `nft --check` → automatic backup → apply in a single transaction and verify → on failure, restore the previous project ruleset. There is no intermediate commit with a DNAT but no FORWARD. Automatic backups keep the last 20 by default.
+Every change follows the same pipeline: take an exclusive `flock` to prevent concurrency → generate candidate config and complete rules → verify ownership of same-named tables → preflight with `nft --check` → back up the current state → apply as a single nftables transaction → on failure, restore the previous rules.
+
+Either everything takes effect or nothing does — never "DNAT added but the accept rule missing". Automatic backups keep the last 20 by default.
 
 ### Three Masquerade modes
 
-1. `precise` (default): matches DNAT status, destination IP, destination port, and protocol. Minimal impact; recommended.
-2. `destination`: matches DNAT status and destination IP. Rules sharing a target IP share one generated rule.
-3. `none` (`--no-masquerade`): preserves the client source IP, but you must configure the return route yourself.
+Masquerade rewrites the source address of forwarded packets to the relay's own address, so destination replies naturally return to the relay. The three modes differ only in how broadly they match:
+
+1. `precise` (default, recommended): matches DNAT status + destination IP + destination port + protocol. Affects only this tool's forwarded traffic — minimal impact.
+2. `destination`: matches DNAT status + destination IP. Rules pointing at the same destination IP share one generated rule — fewer rules, broader effect.
+3. `none` (`--no-masquerade`): no source rewriting, so the destination sees real client IPs — but you must configure the return route yourself.
 
 ### Coexisting with other firewalls
 
-In nftables, one hook can host multiple base chains, and an `accept` in one does not guarantee global acceptance. The project only rebuilds its two marked tables and never changes other chains' policy or priority, so UFW, firewalld, or Docker rules can still drop forwarded traffic. `doctor` reports common conflicts but cannot prove arbitrary third-party policy is compatible; if Docker rebuilds its firewall after the project service starts, run `apply` again.
+nftables allows multiple base chains on the same hook: an `accept` in this tool's chain does not stop another chain from dropping the packet. The tool only rebuilds its two marked tables and never changes other chains' policy or priority — so UFW, firewalld, or Docker rules can still block forwarded traffic. `doctor` catches common conflicts but cannot prove arbitrary third-party policy is compatible; if Docker rebuilds its firewall after the project service started, run `apply` again.
 
 ## Files
 
@@ -162,9 +196,9 @@ In nftables, one hook can host multiple base chains, and an `accept` in one does
 | `/etc/vps-forward/lock` | Concurrency lock |
 | `/etc/vps-forward/state` | Last apply/backup state |
 | `/var/log/vps-forward.log` | Operation log |
-| `/etc/sysctl.d/99-vps-forward.conf` | Persistent IPv4 forwarding |
+| `/etc/sysctl.d/99-vps-forward.conf` | Persistent IPv4 forwarding config |
 
-The persistence service calls `apply` after `network-online` and the distribution's nftables service. It fully rebuilds the project tables every time — idempotent, and it never overwrites the distribution's main config file.
+The persistence service runs `apply` after `network-online` and the distribution's nftables service. It fully rebuilds the project's two tables every time — idempotent, and it never overwrites the distribution's main config file.
 
 ## Backup and uninstall
 
@@ -175,9 +209,9 @@ sudo vps-forward export --output /root/vps-forward-config.tsv
 sudo vps-forward import --input /root/vps-forward-config.tsv --yes
 ```
 
-Internal backups include the config, generated rules, a manifest, and the service and sysctl files when present. Restore/import validates first, backs up the current state, and runs the nft check.
+Internal backups contain the config, generated rules, a manifest, and the service and sysctl files when present. Restore and import validate first, back up the current state, and pass the nft check before applying.
 
-Uninstall keeps the configuration, backups, the nftables package, the sysctl file, and the IPv4 forwarding state by default:
+Uninstall is conservative by default — it keeps the configuration, backups, the nftables package, the sysctl file, and the IPv4 forwarding switch:
 
 ```bash
 sudo vps-forward uninstall --yes --keep-config   # default behavior
@@ -186,30 +220,30 @@ sudo vps-forward uninstall --yes --purge         # also delete config and backup
 # optional extras: --remove-sysctl --remove-package
 ```
 
-Even when removing the sysctl file, the uninstaller never writes `net.ipv4.ip_forward=0`, to avoid breaking containers, VPNs, or other forwarding services.
+Even when the sysctl file is removed, the uninstaller never writes `net.ipv4.ip_forward=0` — containers, VPNs, or other forwarding services may still depend on it.
 
 ## Troubleshooting
 
-1. Run `sudo vps-forward doctor` and `sudo vps-forward check`.
+1. Start with `sudo vps-forward doctor` and `sudo vps-forward check`.
 2. Confirm `/proc/sys/net/ipv4/ip_forward` is `1`.
-3. Inspect DNAT, FORWARD, and Masquerade with `sudo vps-forward rules`.
-4. Check whether the listen port overlaps SSH or other services: `ss -lntup`.
-5. Check whether UFW/firewalld/other nftables base chains drop the traffic, plus cloud security groups and upstream ACLs.
-6. Without Masquerade, verify the destination VPS return route.
-7. Check `/var/log/vps-forward.log` and systemd/OpenRC logs.
-8. Audit the candidate transaction with `sudo vps-forward apply --dry-run`.
+3. Use `sudo vps-forward rules` to verify the DNAT, FORWARD accept, and Masquerade rules were all generated.
+4. Check whether the listen port collides with SSH or other services: `ss -lntup`.
+5. Check whether UFW / firewalld / other nftables base chains drop the forwarded traffic, plus cloud security groups and upstream ACLs.
+6. With Masquerade off, verify the destination VPS return route.
+7. Read `/var/log/vps-forward.log` and the systemd / OpenRC logs.
+8. Review the transaction that would be applied with `sudo vps-forward apply --dry-run`.
 
-Port-occupancy detection is only a hint. No UDP listener record does not prove the path is usable; containers, IP-specific binds, and post-check races can all affect the result.
+Note: port-occupancy detection is only a hint. No UDP "listener" record does not prove the path is usable; containers, IP-specific binds, and races between check and apply can all skew the result.
 
 ## FAQ
 
-**Why not modify the system `forward` chain?** To avoid changing the global policy or overriding Docker/UFW. The project creates its own base chain and accepts that other chains retain the final veto.
+**Why not just modify the system `forward` chain?** To avoid changing the global policy or overriding Docker/UFW rules. The project creates its own base chain and accepts that other chains keep the final veto.
 
-**Why is Masquerade the default?** Most destination VPSes don't know client subnets should return via the relay. Masquerade makes replies naturally return through the relay; the precise mode has the smallest impact.
+**Why is Masquerade on by default?** Most destination VPSes don't know that client subnets should return via the relay. Masquerade makes replies naturally come back through the relay with zero destination-side setup; the precise mode has the smallest impact.
 
-**Can I preserve the real client IP?** Yes, with `--no-masquerade`, but you must configure the return route on the destination side. DNAT itself does not create that route.
+**Can I preserve real client IPs?** Yes, with `--no-masquerade` — but you must configure the return route on the destination. DNAT itself does not create that route.
 
-**IPv6 or port ranges?** Not in v0.1. The config schema and generator are already layered, so these can be added later without relying on nft handles.
+**IPv6 or port ranges?** Not in v0.1. The config format and rule generator are layered, so these can be added later without breaking changes.
 
 ## Development
 

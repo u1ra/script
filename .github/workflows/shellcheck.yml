@@ -1,35 +1,139 @@
-name: vps-forward
+name: Repository CI
 
 on:
   push:
     branches: ["**"]
-    paths:
-      - "vps-forward/**"
-      - ".github/workflows/shellcheck.yml"
   pull_request:
-    paths:
-      - "vps-forward/**"
-      - ".github/workflows/shellcheck.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  lint-and-test:
+  shell-quality:
+    name: Shell syntax and ShellCheck
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: vps-forward
     steps:
       - uses: actions/checkout@v5
+
       - name: Install ShellCheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
-      - name: Syntax
+
+      - name: Check shell syntax
+        shell: bash
         run: |
-          bash -n vps-forward.sh uninstall.sh lib/vps-forward-core.sh tests/*.sh
-          sh -n install.sh
-      - name: ShellCheck
-        run: shellcheck vps-forward.sh install.sh uninstall.sh lib/*.sh tests/*.sh
-      - name: Tests
-        run: bash tests/run-tests.sh
+          set -Eeuo pipefail
+          mapfile -d '' shell_files < <(
+            find . -type f -name '*.sh' -not -path './.git/*' -print0 | sort -z
+          )
+
+          if ((${#shell_files[@]} == 0)); then
+            echo "No .sh files found."
+            exit 0
+          fi
+
+          status=0
+          for file in "${shell_files[@]}"; do
+            display="${file#./}"
+            IFS= read -r shebang <"$file" || true
+            case "$shebang" in
+              '#!/usr/bin/env bash'|'#!/bin/bash')
+                echo "bash -n $display"
+                bash -n "$file" || status=1
+                ;;
+              '#!/bin/sh'|'#!/usr/bin/env sh')
+                echo "sh -n $display"
+                sh -n "$file" || status=1
+                ;;
+              *)
+                echo "::error file=$display::Missing or unsupported shell shebang"
+                status=1
+                ;;
+            esac
+          done
+          exit "$status"
+
+      - name: Run ShellCheck
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -d '' shell_files < <(
+            find . -type f -name '*.sh' -not -path './.git/*' -print0 | sort -z
+          )
+          if ((${#shell_files[@]} > 0)); then
+            shellcheck "${shell_files[@]}"
+          else
+            echo "No .sh files found."
+          fi
+
+  project-tests:
+    name: Project contract and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate project structure
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          status=0
+
+          mapfile -d '' root_shell_files < <(
+            find . -maxdepth 1 -type f -name '*.sh' -print0 | sort -z
+          )
+          for file in "${root_shell_files[@]}"; do
+            display="${file#./}"
+            echo "::error file=$display::Shell projects must live in their own top-level directory"
+            status=1
+          done
+
+          while IFS= read -r -d '' project_dir; do
+            mapfile -d '' project_shell_files < <(
+              find "$project_dir" -type f -name '*.sh' -print0 | sort -z
+            )
+            ((${#project_shell_files[@]} > 0)) || continue
+
+            project="${project_dir#./}"
+            for required in README.md LICENSE tests/run-tests.sh; do
+              if [[ ! -f "$project_dir/$required" ]]; then
+                echo "::error file=$project/$required::$project is missing required file $required"
+                status=1
+              fi
+            done
+          done < <(
+            find . -mindepth 1 -maxdepth 1 -type d ! -name '.*' -print0 | sort -z
+          )
+
+          exit "$status"
+
+      - name: Discover and run project tests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -d '' test_entries < <(
+            find . -type f -path '*/tests/run-tests.sh' \
+              -not -path './.git/*' -print0 | sort -z
+          )
+
+          if ((${#test_entries[@]} == 0)); then
+            echo "::error::No tests/run-tests.sh entrypoint found"
+            exit 1
+          fi
+
+          status=0
+          for test_entry in "${test_entries[@]}"; do
+            project_dir="$(dirname -- "$(dirname -- "$test_entry")")"
+            project="${project_dir#./}"
+            echo "::group::Test $project"
+            if (
+              cd -- "$project_dir"
+              bash tests/run-tests.sh
+            ); then
+              echo "PASS: $project"
+            else
+              echo "::error file=${test_entry#./}::Tests failed for $project"
+              status=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$status"

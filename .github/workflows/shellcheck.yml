@@ -57,14 +57,30 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          mapfile -d '' shell_files < <(
-            find . -type f -name '*.sh' -not -path './.git/*' -print0 | sort -z
+          status=0
+
+          mapfile -d '' root_shell_files < <(
+            find . -maxdepth 1 -type f -name '*.sh' -print0 | sort -z
           )
-          if ((${#shell_files[@]} > 0)); then
-            shellcheck "${shell_files[@]}"
-          else
-            echo "No .sh files found."
+          if ((${#root_shell_files[@]} > 0)); then
+            shellcheck "${root_shell_files[@]}" || status=1
           fi
+
+          while IFS= read -r -d '' top_level_dir; do
+            (
+              cd -- "$top_level_dir"
+              mapfile -d '' shell_files < <(
+                find . -type f -name '*.sh' -print0 | sort -z
+              )
+              ((${#shell_files[@]} > 0)) || exit 0
+              echo "ShellCheck: ${top_level_dir#./}"
+              shellcheck "${shell_files[@]}"
+            ) || status=1
+          done < <(
+            find . -mindepth 1 -maxdepth 1 -type d ! -name '.git' -print0 | sort -z
+          )
+
+          exit "$status"
 
   project-tests:
     name: Project contract and tests

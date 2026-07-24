@@ -1381,10 +1381,9 @@ menu_clear() {
 }
 
 menu_pause() {
-    local unused
     [[ -t 0 && -t 1 ]] || return 0
     printf '\n%s按 Enter 返回主菜单…%s' "$VPF_UI_DIM" "$VPF_UI_RESET"
-    read -r unused || true
+    read -r || true
 }
 
 menu_run_action() {

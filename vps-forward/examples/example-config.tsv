@@ -1,0 +1,4 @@
+# vps-forward-config-v1
+# id	enabled	protocol	listen_ip	listen_port	target_ip	target_port	masquerade_mode	name	created_at	updated_at
+1	1	both	*	8443	192.0.2.10	20086	precise	edge-to-origin	2026-01-01T00:00:00Z	2026-01-01T00:00:00Z
+2	0	tcp	198.51.100.5	443	192.0.2.20	8443	destination	disabled-example	2026-01-01T00:00:00Z	2026-01-01T00:00:00Z

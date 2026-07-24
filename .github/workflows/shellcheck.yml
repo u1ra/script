@@ -1,0 +1,35 @@
+name: vps-forward
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "vps-forward/**"
+      - ".github/workflows/shellcheck.yml"
+  pull_request:
+    paths:
+      - "vps-forward/**"
+      - ".github/workflows/shellcheck.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vps-forward
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Syntax
+        run: |
+          bash -n vps-forward.sh uninstall.sh lib/vps-forward-core.sh tests/*.sh
+          sh -n install.sh
+      - name: ShellCheck
+        run: shellcheck vps-forward.sh install.sh uninstall.sh lib/*.sh tests/*.sh
+      - name: Tests
+        run: bash tests/run-tests.sh

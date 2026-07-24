@@ -846,8 +846,23 @@ write_owned_file() {
 
 install_program_files() {
     local main_source="$SCRIPT_DIR/vps-forward.sh" core_source="$SCRIPT_DIR/lib/vps-forward-core.sh"
+    local installed_main="${VPF_INSTALLED_PROGRAM_SOURCE:-/usr/local/sbin/vps-forward}"
+    local installed_core="${VPF_INSTALLED_CORE_SOURCE:-/usr/local/lib/vps-forward/vps-forward-core.sh}"
+    local source_is_installed=0
     local shortcut=/usr/local/bin/vpf
-    [[ -f "$main_source" && -f "$core_source" ]] || vpf_die "请从完整源码目录运行 install"
+    if [[ ! -f "$main_source" || ! -f "$core_source" ]]; then
+        if [[ -f "$installed_main" && ! -L "$installed_main" &&
+            -f "$installed_core" && ! -L "$installed_core" ]] &&
+            grep -Fq '# vps-forward managed program' "$installed_main" &&
+            grep -Fq '# vps-forward managed core library' "$installed_core"; then
+            main_source="$installed_main"
+            core_source="$installed_core"
+            source_is_installed=1
+        else
+            vpf_die "找不到完整源码或已安装程序文件，无法初始化环境"
+            return
+        fi
+    fi
     if [[ "$VPF_SYSTEM_MODE" == "mock" ]]; then
         mkdir -p "$VPF_MOCK_DIR/usr/local/sbin" "$VPF_MOCK_DIR/usr/local/bin" \
             "$VPF_MOCK_DIR/usr/local/lib/vps-forward"
@@ -881,8 +896,10 @@ install_program_files() {
     fi
     install -d -m 755 /usr/local/lib/vps-forward
     install -d -m 755 /usr/local/bin
-    install -m 755 "$main_source" /usr/local/sbin/vps-forward
-    install -m 644 "$core_source" /usr/local/lib/vps-forward/vps-forward-core.sh
+    if [[ "$source_is_installed" == "0" ]]; then
+        install -m 755 "$main_source" /usr/local/sbin/vps-forward
+        install -m 644 "$core_source" /usr/local/lib/vps-forward/vps-forward-core.sh
+    fi
     if [[ ! -L "$shortcut" ]]; then
         ln -s /usr/local/sbin/vps-forward "$shortcut"
     fi

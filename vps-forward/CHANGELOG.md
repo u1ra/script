@@ -4,6 +4,16 @@ All notable changes follow [Keep a Changelog](https://keepachangelog.com/) and S
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-07-24
+
+### Fixed
+
+- Allow menu option 1 to repair an installed `/usr/local` layout without requiring the original source checkout.
+
+### Documentation
+
+- Document every interactive menu option and the installed-layout repair behavior.
+
 ## [0.1.1] - 2026-07-24
 
 ### Added

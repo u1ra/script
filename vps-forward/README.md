@@ -72,7 +72,7 @@ sudo bash vps-forward.sh
 发布 Release 后，下载固定标签而不是 `main`，并使用该 Release 附带的校验文件：
 
 ```bash
-VERSION=v0.1.1
+VERSION=v0.1.2
 curl -fLO "https://github.com/u1ra/script/releases/download/${VERSION}/vps-forward-${VERSION}.tar.gz"
 curl -fLO "https://github.com/u1ra/script/releases/download/${VERSION}/vps-forward-${VERSION}.tar.gz.sha256"
 sha256sum -c "vps-forward-${VERSION}.tar.gz.sha256"
@@ -85,7 +85,7 @@ sudo ./install.sh
 可给远程引导器指定版本和期望散列：
 
 ```bash
-sudo env VPF_INSTALL_VERSION=v0.1.1 VPF_SHA256='<release-sha256>' ./install.sh
+sudo env VPF_INSTALL_VERSION=v0.1.2 VPF_SHA256='<release-sha256>' ./install.sh
 ```
 
 ### 使用 curl 一键安装并启动
@@ -168,6 +168,25 @@ sudo vps-forward add \
 ## 交互菜单
 
 直接运行 `sudo vpf`（或 `sudo vps-forward`）。菜单包含初始化、新增、查看、修改、删除、启停、查看实际规则、检查、备份、恢复、导入、导出、重新应用和卸载。输入提示会显示默认值；`q` 可取消当前输入；删除、恢复、导入和卸载要求再次确认。无效菜单项会重新提示。
+
+| 选项 | 作用 |
+|---|---|
+| `1. 初始化环境` | 检测已安装版本，安装或检查 nftables、iproute2、flock，开启 IPv4 转发，修复程序文件、`vpf` 快捷命令和 systemd/OpenRC 服务，然后重新应用项目规则。版本不一致时提供升级、重装、卸载和取消。 |
+| `2. 新增转发规则` | 依次输入名称、监听 IP/端口、目标 IPv4/端口、TCP/UDP/BOTH 和 Masquerade 模式；校验并原子应用。 |
+| `3. 查看转发规则` | 列出 TSV 中的全部规则，包括 ID、启停状态、协议、监听地址、目标和 Masquerade 模式。 |
+| `4. 修改转发规则` | 先显示指定规则，目前交互模式可修改目标端口；其他字段可使用 `vps-forward edit ID ...` 修改。 |
+| `5. 删除转发规则` | 显示规则详情，输入 `YES` 二次确认后删除，并完整重建项目表，避免残留。 |
+| `6. 启用规则` | 保留原配置并把规则设为启用，随后生成 DNAT、FORWARD 和所需 Masquerade。 |
+| `7. 禁用规则` | 规则仍保留在配置中，但不会生成实际转发规则。 |
+| `8. 查看 nftables 实际规则` | 读取内核中本项目的 NAT 和 filter 表，不显示或修改其他软件的表。 |
+| `9. 检查配置` | 校验配置格式、字段、冲突和候选 nftables 事务；不主动修复。 |
+| `10. 备份配置` | 备份 TSV、生成规则、manifest，以及存在时的服务和 sysctl 文件。 |
+| `11. 恢复配置` | 根据内部备份目录名恢复；恢复前再次备份当前状态并校验候选规则。 |
+| `12. 导入配置` | 从指定绝对路径导入 TSV，校验、备份并应用。 |
+| `13. 导出配置` | 将当前 TSV 原子复制到指定绝对路径，便于迁移。 |
+| `14. 修复或重新应用规则` | 从配置完整重新生成两个项目表，执行 `nft --check` 后原子应用。 |
+| `15. 卸载` | 默认保留配置、备份、sysctl 和 nftables 软件包，只移除项目规则、服务和程序。 |
+| `0. 退出` | 退出管理菜单，不修改配置。 |
 
 ## 命令行
 
@@ -336,7 +355,7 @@ sudo vps-forward uninstall --yes --purge --remove-sysctl --remove-package
 
 ```bash
 git fetch --tags
-git checkout v0.1.1
+git checkout v0.1.2
 sudo ./install.sh
 sudo vps-forward check
 sudo vps-forward apply

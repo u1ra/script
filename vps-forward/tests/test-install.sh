@@ -6,10 +6,10 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/test-helper.sh"
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 VPF="$PROJECT_ROOT/vps-forward.sh"
 
-if [[ "$("$VPF" version)" == "vps-forward 0.1.1" ]]; then
-    pass "源码版本为 0.1.1"
+if [[ "$("$VPF" version)" == "vps-forward 0.1.2" ]]; then
+    pass "源码版本为 0.1.2"
 else
-    fail "源码版本为 0.1.1"
+    fail "源码版本为 0.1.2"
 fi
 
 for platform in ubuntu debian alpine; do
@@ -54,7 +54,7 @@ fi
 assert_contains "开启 IPv4 转发动作" "$VPF_MOCK_DIR/actions" 'sysctl=net.ipv4.ip_forward=1'
 
 # 版本不一致且 --yes 时默认安全升级并保留配置。
-printf '0.1.0\n' >"$VPF_MOCK_DIR/installed-version"
+printf '0.1.1\n' >"$VPF_MOCK_DIR/installed-version"
 : >"$VPF_MOCK_DIR/actions"
 upgrade_before="$(sha256sum "$VPF_CONFIG_FILE")"
 VPF_TEST_PLATFORM=debian "$VPF" install --yes
@@ -65,14 +65,14 @@ if [[ "$upgrade_before" == "$upgrade_after" ]]; then
 else
     fail "升级保留配置"
 fi
-if [[ "$(<"$VPF_MOCK_DIR/installed-version")" == "0.1.1" ]]; then
+if [[ "$(<"$VPF_MOCK_DIR/installed-version")" == "0.1.2" ]]; then
     pass "升级写入新版本"
 else
     fail "升级写入新版本"
 fi
 
 # 重装会先保守卸载，再恢复程序、快捷命令和项目规则。
-printf '0.1.0\n' >"$VPF_MOCK_DIR/installed-version"
+printf '0.1.1\n' >"$VPF_MOCK_DIR/installed-version"
 : >"$VPF_MOCK_DIR/actions"
 VPF_TEST_PLATFORM=debian "$VPF" install --reinstall --yes
 assert_contains "版本不一致可选择重装" "$VPF_MOCK_DIR/actions" 'version-action=reinstall'
@@ -115,6 +115,25 @@ if [[ ! -e "$VPF_MOCK_DIR/installed-version" && ! -L "$VPF_MOCK_DIR/usr/local/bi
     pass "版本卸载移除程序和快捷命令"
 else
     fail "版本卸载移除程序和快捷命令"
+fi
+
+# 从 /usr/local 的已安装布局打开菜单时，初始化应复用受管理的程序和核心库。
+installed_layout="$TEST_ROOT/installed-layout"
+layout_mock="$TEST_ROOT/layout-mock"
+mkdir -p "$installed_layout/sbin" "$installed_layout/lib"
+cp -- "$PROJECT_ROOT/vps-forward.sh" "$installed_layout/sbin/vps-forward"
+cp -- "$PROJECT_ROOT/lib/vps-forward-core.sh" "$installed_layout/lib/vps-forward-core.sh"
+VPF_LIB_MODE=1 \
+VPF_SYSTEM_MODE=mock \
+VPF_MOCK_DIR="$layout_mock" \
+VPF_INSTALLED_PROGRAM_SOURCE="$installed_layout/sbin/vps-forward" \
+VPF_INSTALLED_CORE_SOURCE="$installed_layout/lib/vps-forward-core.sh" \
+bash -c 'source "$1"; SCRIPT_DIR=/missing/source; install_program_files' _ "$PROJECT_ROOT/vps-forward.sh"
+if [[ -f "$layout_mock/usr/local/sbin/vps-forward" &&
+    -f "$layout_mock/usr/local/lib/vps-forward/vps-forward-core.sh" ]]; then
+    pass "已安装布局可执行初始化修复"
+else
+    fail "已安装布局可执行初始化修复"
 fi
 
 printf '1..%d\n' "$TESTS_RUN"

@@ -3,7 +3,7 @@
 
 # vps-forward 核心库。主程序负责启用严格模式，本文件也可由测试直接加载。
 
-VPF_VERSION="${VPF_VERSION:-0.1.1}"
+VPF_VERSION="${VPF_VERSION:-0.1.2}"
 VPF_SCHEMA="vps-forward-config-v1"
 VPF_MARK="vps-forward managed table v1"
 

@@ -6,7 +6,7 @@
 
 | 目录 | 用途 | 状态 |
 |---|---|---|
-| [`vps-forward/`](vps-forward/) | 使用 nftables 安装、配置和管理 IPv4 TCP/UDP 四层端口转发 | v0.1.1 |
+| [`vps-forward/`](vps-forward/) | 使用 nftables 安装、配置和管理 IPv4 TCP/UDP 四层端口转发 | v0.1.2 |
 
 ## 使用说明
 

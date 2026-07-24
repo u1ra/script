@@ -6,10 +6,10 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/test-helper.sh"
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 VPF="$PROJECT_ROOT/vps-forward.sh"
 
-if [[ "$("$VPF" version)" == "vps-forward 0.1.2" ]]; then
-    pass "源码版本为 0.1.2"
+if [[ "$("$VPF" version)" == "vps-forward 0.1.3" ]]; then
+    pass "源码版本为 0.1.3"
 else
-    fail "源码版本为 0.1.2"
+    fail "源码版本为 0.1.3"
 fi
 
 for platform in ubuntu debian alpine; do
@@ -65,7 +65,7 @@ if [[ "$upgrade_before" == "$upgrade_after" ]]; then
 else
     fail "升级保留配置"
 fi
-if [[ "$(<"$VPF_MOCK_DIR/installed-version")" == "0.1.2" ]]; then
+if [[ "$(<"$VPF_MOCK_DIR/installed-version")" == "0.1.3" ]]; then
     pass "升级写入新版本"
 else
     fail "升级写入新版本"

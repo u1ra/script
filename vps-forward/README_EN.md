@@ -44,7 +44,7 @@ bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/u1ra/script/ma
 
 On Alpine, the POSIX installer bootstraps Bash before launching the main program.
 
-The installer creates `vpf` as a shortcut that opens the interactive management menu. On repeated installation, equal versions are repaired idempotently. A different version offers upgrade, reinstall, uninstall, or cancel; `--upgrade`, `--reinstall`, `--uninstall-existing`, and `--yes` are available for automation.
+The installer creates `vpf` as a shortcut that opens the interactive management menu. The menu includes a live status summary, grouped actions, terminal-aware colors, and a pause after each action so its result remains visible. Set `NO_COLOR=1` or `VPF_COLOR=never` to disable colors. On repeated installation, equal versions are repaired idempotently. A different version offers upgrade, reinstall, uninstall, or cancel; `--upgrade`, `--reinstall`, `--uninstall-existing`, and `--yes` are available for automation.
 
 ## Quick start
 

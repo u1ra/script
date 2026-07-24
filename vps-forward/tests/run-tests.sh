@@ -9,6 +9,7 @@ tests=(
     test-cli.sh
     test-reliability.sh
     test-install.sh
+    test-menu.sh
 )
 
 for test_file in "${tests[@]}"; do

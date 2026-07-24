@@ -72,7 +72,7 @@ sudo bash vps-forward.sh
 发布 Release 后，下载固定标签而不是 `main`，并使用该 Release 附带的校验文件：
 
 ```bash
-VERSION=v0.1.2
+VERSION=v0.1.3
 curl -fLO "https://github.com/u1ra/script/releases/download/${VERSION}/vps-forward-${VERSION}.tar.gz"
 curl -fLO "https://github.com/u1ra/script/releases/download/${VERSION}/vps-forward-${VERSION}.tar.gz.sha256"
 sha256sum -c "vps-forward-${VERSION}.tar.gz.sha256"
@@ -85,7 +85,7 @@ sudo ./install.sh
 可给远程引导器指定版本和期望散列：
 
 ```bash
-sudo env VPF_INSTALL_VERSION=v0.1.2 VPF_SHA256='<release-sha256>' ./install.sh
+sudo env VPF_INSTALL_VERSION=v0.1.3 VPF_SHA256='<release-sha256>' ./install.sh
 ```
 
 ### 使用 curl 一键安装并启动
@@ -167,7 +167,23 @@ sudo vps-forward add \
 
 ## 交互菜单
 
-直接运行 `sudo vpf`（或 `sudo vps-forward`）。菜单包含初始化、新增、查看、修改、删除、启停、查看实际规则、检查、备份、恢复、导入、导出、重新应用和卸载。输入提示会显示默认值；`q` 可取消当前输入；删除、恢复、导入和卸载要求再次确认。无效菜单项会重新提示。
+直接运行 `sudo vpf`（或 `sudo vps-forward`）。新版菜单顶部会汇总版本、系统、服务、IPv4 转发、配置和规则数量，功能按“规则管理”“系统与诊断”“数据与维护”分组。终端支持时自动显示颜色；设置 `NO_COLOR=1` 或 `VPF_COLOR=never` 可关闭颜色，`VPF_COLOR=always` 可强制开启。
+
+```text
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  VPS FORWARD  nftables IPv4 四层端口转发管理
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  版本 v0.1.3  系统 debian 12
+  服务 ● 运行中   IPv4 转发 ● 已开启   配置 ● 正常
+  规则 总计 3 / 启用 2 / 禁用 1
+
+  规则管理
+  [1]  初始化 / 修复环境
+  [2]  新增转发规则          [3]  查看转发规则
+  ...
+```
+
+每项操作完成后会停留在结果页面，按 Enter 返回主菜单。主菜单输入 `0` 或 `q` 退出；字段输入提示会显示默认值，输入 `q` 可取消当前输入。删除、恢复、导入和卸载要求再次确认，无效菜单项会重新提示。
 
 | 选项 | 作用 |
 |---|---|
@@ -355,7 +371,7 @@ sudo vps-forward uninstall --yes --purge --remove-sysctl --remove-package
 
 ```bash
 git fetch --tags
-git checkout v0.1.2
+git checkout v0.1.3
 sudo ./install.sh
 sudo vps-forward check
 sudo vps-forward apply

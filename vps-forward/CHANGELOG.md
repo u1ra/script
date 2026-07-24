@@ -4,6 +4,19 @@ All notable changes follow [Keep a Changelog](https://keepachangelog.com/) and S
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-07-24
+
+### Added
+
+- Terminal-aware colored management dashboard with service, IPv4 forwarding, configuration, and rule-count summaries.
+- Grouped menu actions and `q` as a main-menu exit shortcut.
+- Menu rendering tests for initialized, uninitialized, colored, and plain output.
+
+### Changed
+
+- Pause after interactive actions so command results remain visible before the dashboard is redrawn.
+- Exit the running menu after a successful uninstall.
+
 ## [0.1.2] - 2026-07-24
 
 ### Fixed

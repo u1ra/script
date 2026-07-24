@@ -1210,62 +1210,262 @@ menu_id_action() {
     esac
 }
 
+VPF_UI_RESET=""
+VPF_UI_BOLD=""
+VPF_UI_DIM=""
+VPF_UI_CYAN=""
+VPF_UI_BLUE=""
+VPF_UI_GREEN=""
+VPF_UI_YELLOW=""
+VPF_UI_RED=""
+
+vpf_ui_init() {
+    local color_mode="${VPF_COLOR:-auto}" enable_color=0
+    case "$color_mode" in
+        always) enable_color=1 ;;
+        never) enable_color=0 ;;
+        auto)
+            if [[ -t 1 && "${TERM:-dumb}" != "dumb" && -z "${NO_COLOR:-}" ]]; then
+                enable_color=1
+            fi
+            ;;
+        *) enable_color=0 ;;
+    esac
+    if [[ "$enable_color" == "1" ]]; then
+        VPF_UI_RESET=$'\033[0m'
+        VPF_UI_BOLD=$'\033[1m'
+        VPF_UI_DIM=$'\033[2m'
+        VPF_UI_CYAN=$'\033[36m'
+        VPF_UI_BLUE=$'\033[34m'
+        VPF_UI_GREEN=$'\033[32m'
+        VPF_UI_YELLOW=$'\033[33m'
+        VPF_UI_RED=$'\033[31m'
+    else
+        VPF_UI_RESET=""
+        VPF_UI_BOLD=""
+        VPF_UI_DIM=""
+        VPF_UI_CYAN=""
+        VPF_UI_BLUE=""
+        VPF_UI_GREEN=""
+        VPF_UI_YELLOW=""
+        VPF_UI_RED=""
+    fi
+}
+
+menu_service_summary() {
+    if [[ -n "${VPF_MENU_SERVICE_STATE:-}" ]]; then
+        printf '%s\n' "$VPF_MENU_SERVICE_STATE"
+    elif [[ "$VPF_SYSTEM_MODE" == "mock" ]]; then
+        if [[ -f "$VPF_MOCK_DIR/installed-version" ]]; then
+            printf '运行中\n'
+        else
+            printf '未安装\n'
+        fi
+    elif command -v systemctl >/dev/null 2>&1; then
+        if systemctl is-active --quiet vps-forward.service 2>/dev/null; then
+            printf '运行中\n'
+        elif systemctl is-enabled --quiet vps-forward.service 2>/dev/null; then
+            printf '已启用/未运行\n'
+        else
+            printf '未安装\n'
+        fi
+    elif command -v rc-service >/dev/null 2>&1; then
+        if rc-service vps-forward status >/dev/null 2>&1; then
+            printf '运行中\n'
+        elif [[ -e /etc/init.d/vps-forward ]]; then
+            printf '未运行\n'
+        else
+            printf '未安装\n'
+        fi
+    else
+        printf '未知\n'
+    fi
+}
+
+menu_status_value() {
+    local value="$1" good_pattern="$2"
+    if [[ "$value" =~ $good_pattern ]]; then
+        printf '%s● %s%s' "$VPF_UI_GREEN" "$value" "$VPF_UI_RESET"
+    elif [[ "$value" == "配置异常" || "$value" == "未开启" ||
+        "$value" == "未运行" || "$value" == "已启用/未运行" ]]; then
+        printf '%s● %s%s' "$VPF_UI_RED" "$value" "$VPF_UI_RESET"
+    elif [[ "$value" == "未知" ]]; then
+        printf '%s● %s%s' "$VPF_UI_DIM" "$value" "$VPF_UI_RESET"
+    else
+        printf '%s● %s%s' "$VPF_UI_YELLOW" "$value" "$VPF_UI_RESET"
+    fi
+}
+
+render_main_menu() {
+    local os_line os_id os_version service ip_forward ip_forward_label
+    local config_state total=0 enabled=0 disabled=0
+
+    vpf_ui_init
+    os_line="$(detect_os)"
+    IFS=$'\t' read -r os_id os_version <<<"$os_line"
+    service="$(menu_service_summary)"
+    if [[ -n "${VPF_MENU_IP_FORWARD:-}" ]]; then
+        ip_forward="$VPF_MENU_IP_FORWARD"
+    elif [[ -r /proc/sys/net/ipv4/ip_forward ]]; then
+        ip_forward="$(</proc/sys/net/ipv4/ip_forward)"
+    else
+        ip_forward="未知"
+    fi
+    case "$ip_forward" in
+        1) ip_forward_label="已开启" ;;
+        0) ip_forward_label="未开启" ;;
+        *) ip_forward_label="未知" ;;
+    esac
+
+    if [[ ! -e "$VPF_CONFIG_FILE" ]]; then
+        config_state="未初始化"
+    elif [[ -f "$VPF_CONFIG_FILE" && ! -L "$VPF_CONFIG_FILE" ]] &&
+        vpf_validate_config "$VPF_CONFIG_FILE" >/dev/null 2>&1; then
+        config_state="正常"
+        total="$(count_rules all)"
+        enabled="$(count_rules enabled)"
+        disabled="$(count_rules disabled)"
+    else
+        config_state="配置异常"
+    fi
+
+    printf '\n%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$VPF_UI_CYAN" "$VPF_UI_RESET"
+    printf '  %s%sVPS FORWARD%s  %snftables IPv4 四层端口转发管理%s\n' \
+        "$VPF_UI_BOLD" "$VPF_UI_CYAN" "$VPF_UI_RESET" "$VPF_UI_DIM" "$VPF_UI_RESET"
+    printf '%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$VPF_UI_CYAN" "$VPF_UI_RESET"
+    printf '  %s版本%s v%s  %s系统%s %s %s\n' \
+        "$VPF_UI_DIM" "$VPF_UI_RESET" "$VPF_VERSION" \
+        "$VPF_UI_DIM" "$VPF_UI_RESET" "$os_id" "${os_version:-}"
+    printf '  %s服务%s ' "$VPF_UI_DIM" "$VPF_UI_RESET"
+    menu_status_value "$service" '^运行中$'
+    printf '   %sIPv4 转发%s ' "$VPF_UI_DIM" "$VPF_UI_RESET"
+    menu_status_value "$ip_forward_label" '^已开启$'
+    printf '   %s配置%s ' "$VPF_UI_DIM" "$VPF_UI_RESET"
+    menu_status_value "$config_state" '^正常$'
+    printf '\n'
+    printf '  %s规则%s 总计 %s / %s启用 %s%s / %s禁用 %s%s\n' \
+        "$VPF_UI_DIM" "$VPF_UI_RESET" "$total" \
+        "$VPF_UI_GREEN" "$enabled" "$VPF_UI_RESET" \
+        "$VPF_UI_YELLOW" "$disabled" "$VPF_UI_RESET"
+
+    printf '\n  %s%s规则管理%s\n' "$VPF_UI_BOLD" "$VPF_UI_BLUE" "$VPF_UI_RESET"
+    printf '  %s[1]%s  初始化 / 修复环境\n' "$VPF_UI_CYAN" "$VPF_UI_RESET"
+    printf '  %s[2]%s  新增转发规则          %s[3]%s  查看转发规则\n' \
+        "$VPF_UI_CYAN" "$VPF_UI_RESET" "$VPF_UI_CYAN" "$VPF_UI_RESET"
+    printf '  %s[4]%s  修改转发规则          %s[5]%s  删除转发规则\n' \
+        "$VPF_UI_CYAN" "$VPF_UI_RESET" "$VPF_UI_CYAN" "$VPF_UI_RESET"
+    printf '  %s[6]%s  启用规则              %s[7]%s  禁用规则\n' \
+        "$VPF_UI_CYAN" "$VPF_UI_RESET" "$VPF_UI_CYAN" "$VPF_UI_RESET"
+
+    printf '\n  %s%s系统与诊断%s\n' "$VPF_UI_BOLD" "$VPF_UI_BLUE" "$VPF_UI_RESET"
+    printf '  %s[8]%s  查看 nftables 实际规则\n' "$VPF_UI_CYAN" "$VPF_UI_RESET"
+    printf '  %s[9]%s  检查配置              %s[14]%s 修复 / 重新应用规则\n' \
+        "$VPF_UI_CYAN" "$VPF_UI_RESET" "$VPF_UI_CYAN" "$VPF_UI_RESET"
+
+    printf '\n  %s%s数据与维护%s\n' "$VPF_UI_BOLD" "$VPF_UI_BLUE" "$VPF_UI_RESET"
+    printf '  %s[10]%s 备份配置              %s[11]%s 恢复配置\n' \
+        "$VPF_UI_CYAN" "$VPF_UI_RESET" "$VPF_UI_CYAN" "$VPF_UI_RESET"
+    printf '  %s[12]%s 导入配置              %s[13]%s 导出配置\n' \
+        "$VPF_UI_CYAN" "$VPF_UI_RESET" "$VPF_UI_CYAN" "$VPF_UI_RESET"
+    printf '  %s[15]%s 卸载\n' "$VPF_UI_RED" "$VPF_UI_RESET"
+
+    printf '\n  %s[0]%s 退出    %sq%s 退出当前菜单\n' \
+        "$VPF_UI_DIM" "$VPF_UI_RESET" "$VPF_UI_DIM" "$VPF_UI_RESET"
+    printf '%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$VPF_UI_CYAN" "$VPF_UI_RESET"
+}
+
+menu_clear() {
+    if [[ -t 1 && "${TERM:-dumb}" != "dumb" && "${VPF_MENU_NO_CLEAR:-0}" != "1" ]]; then
+        printf '\033[2J\033[H'
+    fi
+}
+
+menu_pause() {
+    local unused
+    [[ -t 0 && -t 1 ]] || return 0
+    printf '\n%s按 Enter 返回主菜单…%s' "$VPF_UI_DIM" "$VPF_UI_RESET"
+    read -r unused || true
+}
+
+menu_run_action() {
+    local status=0
+    trap - ERR
+    set +e
+    (
+        set -Eeuo pipefail
+        trap 'exit $?' ERR
+        "$@"
+    )
+    status=$?
+    set -e
+    trap 'vpf_error_trap "$LINENO"' ERR
+    VPF_MENU_LAST_STATUS="$status"
+    if [[ "$status" != "0" ]]; then
+        vpf_warn "操作未完成（退出码 $status），请检查上方提示。"
+    fi
+    menu_pause
+    return 0
+}
+
 interactive_menu() {
     local choice backup_name file answer
+    VPF_MENU_LAST_STATUS=0
     while true; do
-        cat <<'EOF'
-
-vps-forward 菜单
-1. 初始化环境
-2. 新增转发规则
-3. 查看转发规则
-4. 修改转发规则
-5. 删除转发规则
-6. 启用规则
-7. 禁用规则
-8. 查看 nftables 实际规则
-9. 检查配置
-10. 备份配置
-11. 恢复配置
-12. 导入配置
-13. 导出配置
-14. 修复或重新应用规则
-15. 卸载
-0. 退出
-EOF
-        read -r -p '请选择: ' choice || return 0
+        menu_clear
+        render_main_menu
+        printf '  %s请选择 [0-15]:%s ' "$VPF_UI_BOLD" "$VPF_UI_RESET"
+        read -r choice || return 0
         case "$choice" in
-            1) cmd_install ;;
-            2) menu_add ;;
-            3) cmd_list ;;
-            4) menu_id_action edit ;;
-            5) menu_id_action delete ;;
-            6) menu_id_action enable ;;
-            7) menu_id_action disable ;;
-            8) cmd_rules ;;
-            9) cmd_check ;;
-            10) cmd_backup ;;
+            1) menu_run_action cmd_install ;;
+            2) menu_run_action menu_add ;;
+            3) menu_run_action cmd_list ;;
+            4) menu_run_action menu_id_action edit ;;
+            5) menu_run_action menu_id_action delete ;;
+            6) menu_run_action menu_id_action enable ;;
+            7) menu_run_action menu_id_action disable ;;
+            8) menu_run_action cmd_rules ;;
+            9) menu_run_action cmd_check ;;
+            10) menu_run_action cmd_backup ;;
             11)
                 backup_name="$(prompt_value '备份目录名' 'backup-YYYYMMDDTHHMMSSZ-PID-RANDOM')" || continue
                 read -r -p '确认恢复？输入 YES: ' answer || continue
-                [[ "$answer" == "YES" ]] && cmd_restore "$backup_name" --yes
+                if [[ "$answer" == "YES" ]]; then
+                    menu_run_action cmd_restore "$backup_name" --yes
+                else
+                    vpf_info "已取消。"
+                    menu_pause
+                fi
                 ;;
             12)
                 file="$(prompt_value '导入文件绝对路径' '/root/config.tsv')" || continue
                 read -r -p '确认导入？输入 YES: ' answer || continue
-                [[ "$answer" == "YES" ]] && cmd_import --input "$file" --yes
+                if [[ "$answer" == "YES" ]]; then
+                    menu_run_action cmd_import --input "$file" --yes
+                else
+                    vpf_info "已取消。"
+                    menu_pause
+                fi
                 ;;
             13)
                 file="$(prompt_value '导出文件绝对路径' '/root/vps-forward-config.tsv')" || continue
-                cmd_export --output "$file"
+                menu_run_action cmd_export --output "$file"
                 ;;
-            14) cmd_apply ;;
+            14) menu_run_action cmd_apply ;;
             15)
                 read -r -p '确认保守卸载（保留配置和 sysctl）？输入 YES: ' answer || continue
-                [[ "$answer" == "YES" ]] && cmd_uninstall --yes --keep-config
+                if [[ "$answer" == "YES" ]]; then
+                    menu_run_action cmd_uninstall --yes --keep-config
+                    if [[ "$VPF_MENU_LAST_STATUS" == "0" ]]; then
+                        vpf_info "程序已卸载，管理菜单退出。"
+                        return 0
+                    fi
+                else
+                    vpf_info "已取消。"
+                    menu_pause
+                fi
                 ;;
-            0) return 0 ;;
-            *) vpf_warn "无效选择，请重试。" ;;
+            0|q|Q) return 0 ;;
+            *) vpf_warn "无效选择，请输入 0～15。"; menu_pause ;;
         esac
     done
 }
